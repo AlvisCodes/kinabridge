@@ -105,6 +105,15 @@ export class KinabaseClient {
     const records = chunk.map(r => r.fields);
     const postBody = { records };
 
+    logger.debug(
+      { 
+        endpoint, 
+        recordCount: records.length,
+        sampleRecord: records[0]
+      }, 
+      'Sending batch to Kinabase'
+    );
+
     await pRetry(
       async () => {
         const response = await this.#authorizedRequest('POST', endpoint, postBody);
@@ -131,7 +140,12 @@ export class KinabaseClient {
 
         const body = await parseJsonSafely(response);
         logger.error(
-          { status: response.status, body },
+          { 
+            status: response.status, 
+            body,
+            endpoint,
+            sampleRecord: records[0]
+          },
           'Kinabase rejected records payload'
         );
         // Don't retry on client errors (4xx)
