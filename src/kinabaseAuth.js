@@ -26,11 +26,10 @@ const requestNewToken = async () => {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Basic ${Buffer.from(`${apiKey}:${apiSecret}`).toString('base64')}`,
     },
     body: JSON.stringify({
-      apiKey,
-      apiSecret,
+      appId: apiKey,
+      secret: apiSecret,
     }),
   });
 
