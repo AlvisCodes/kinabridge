@@ -143,7 +143,7 @@ export class KinabaseClient {
             status: response.status, 
             body,
             endpoint,
-            sampleRecord: records[0]
+            sampleRecord: chunk[0]
           },
           'Kinabase rejected records payload'
         );
