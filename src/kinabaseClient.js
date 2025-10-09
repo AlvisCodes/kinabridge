@@ -97,19 +97,18 @@ export class KinabaseClient {
   }
 
   async #sendChunk(chunk) {
-    // Extract collection name from first record
-    const collection = chunk[0]?.collection || config.kinabase.collection;
-    const endpoint = `/collections/${collection}/records`;
+    // Use the bulk endpoint for multiple records
+    const collection = config.kinabase.collection;
+    const endpoint = `/collections/${collection}/bulk`;
     
-    // Send just the fields, not the collection name
-    const records = chunk.map(r => r.fields);
-    const postBody = { records };
+    // Send records array in BulkRecordInput format: { records: [{ data: {...} }, ...] }
+    const postBody = { records: chunk };
 
     logger.debug(
       { 
         endpoint, 
-        recordCount: records.length,
-        sampleRecord: records[0]
+        recordCount: chunk.length,
+        sampleRecord: chunk[0]
       }, 
       'Sending batch to Kinabase'
     );
