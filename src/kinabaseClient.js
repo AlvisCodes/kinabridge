@@ -113,6 +113,8 @@ class KinabaseClient {
 
   async #upsertSingleRecord(collection, externalService, externalId, record) {
     const endpoint = `/collections/${collection}/ext/${externalService}/${externalId}`;
+    
+    logger.debug({ endpoint, collection, externalService, externalId }, 'Upserting record to Kinabase');
 
     await pRetry(
       async () => {
