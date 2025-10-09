@@ -1,0 +1,23 @@
+{
+  "name": "kinabase-bridge",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Kinabase bridge for Shoestring HumidityMonitoring InfluxDB data.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node src/index.js --once",
+    "lint": "echo \"No lint configuration\""
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@influxdata/influxdb-client": "^1.35.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "node-fetch": "^3.3.2",
+    "p-retry": "^6.2.0",
+    "pino": "^8.19.0"
+  }
+}
