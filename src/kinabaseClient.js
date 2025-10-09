@@ -97,11 +97,17 @@ export class KinabaseClient {
   }
 
   async #sendChunk(chunk) {
-    const postBody = { records: chunk };
+    // Extract collection name from first record
+    const collection = chunk[0]?.collection || config.kinabase.collection;
+    const endpoint = `/collections/${collection}/records`;
+    
+    // Send just the fields, not the collection name
+    const records = chunk.map(r => r.fields);
+    const postBody = { records };
 
     await pRetry(
       async () => {
-        const response = await this.#authorizedRequest('POST', '/records', postBody);
+        const response = await this.#authorizedRequest('POST', endpoint, postBody);
 
         if (response.ok) {
           logger.debug(
@@ -128,9 +134,12 @@ export class KinabaseClient {
           { status: response.status, body },
           'Kinabase rejected records payload'
         );
-        throw new pRetry.AbortError(
+        // Don't retry on client errors (4xx)
+        const error = new Error(
           `Kinabase rejected payload with status ${response.status}`
         );
+        error.name = 'AbortError';
+        throw error;
       },
       {
         retries: 3,

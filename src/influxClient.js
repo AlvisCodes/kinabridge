@@ -31,7 +31,7 @@ export const fetchNewPoints = async ({ since } = {}) => {
 
   const fluxQuery = `
 from(bucket: "${config.influx.bucket}")
-  |> range(start: ${JSON.stringify(rangeStart)})
+  |> range(start: ${rangeStart})
   |> filter(fn: (r) => r._measurement == ${JSON.stringify(MEASUREMENT)})
   |> filter(fn: (r) => ${Array.from(FIELD_WHITELIST)
     .map((field) => `r._field == ${JSON.stringify(field)}`)
