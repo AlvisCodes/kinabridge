@@ -3,22 +3,6 @@ import pRetry from 'p-retry';
 import config from './config.js';
 import logger from './logger.js';
 
-const MAX_BATCH_SIZE = 100;
-
-const chunkRecords = (records, size) => {
-  const chunks = [];
-  for (let i = 0; i < records.length; i += size) {
-    chunks.push(records.slice(i, i + size));
-  }
-  return chunks;
-};
-
-const buildRecordKey = (collection, fields = {}) => {
-  const machine = fields.machine || 'unknown';
-  const timestamp = fields.timestamp || 'unknown';
-  return `${collection}|${machine}|${timestamp}`;
-};
-
 const parseJsonSafely = async (response) => {
   try {
     return await response.json();
@@ -27,113 +11,120 @@ const parseJsonSafely = async (response) => {
   }
 };
 
-const extractConflictMap = (body, chunk) => {
-  const map = new Map();
-  if (!body) {
-    return map;
-  }
+/**
+ * Kinabase client for upserting sensor readings.
+ * Uses external service tracking to maintain one record per machine.
+ */
+class KinabaseClient {
+  #baseUrl;
+  #tokenProvider;
 
-  const candidates = [];
-  if (Array.isArray(body.records)) {
-    candidates.push(...body.records);
-  }
-  if (Array.isArray(body.conflicts)) {
-    candidates.push(...body.conflicts);
-  }
-  if (Array.isArray(body.errors)) {
-    for (const error of body.errors) {
-      if (error?.record) {
-        candidates.push(error.record);
-      } else if (error?.details?.record) {
-        candidates.push(error.details.record);
-      } else if (error?.details?.id) {
-        candidates.push({
-          collection: chunk[0]?.collection,
-          fields: error.details.fields,
-          id: error.details.id,
-        });
-      }
-    }
-  }
-
-  for (const candidate of candidates) {
-    const { id, recordId, _id, fields, collection } = candidate || {};
-    const resolvedId = id || recordId || _id;
-    if (!resolvedId || !fields) {
-      continue;
-    }
-    const candidateCollection = collection || chunk[0]?.collection;
-    const key = buildRecordKey(candidateCollection, fields);
-    map.set(key, resolvedId);
-  }
-
-  return map;
-};
-
-const kinabaseUrl = (path) =>
-  `${config.kinabase.baseUrl.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
-
-export class KinabaseClient {
   constructor({ tokenProvider }) {
-    this.tokenProvider = tokenProvider;
-    this.maxBatchSize = MAX_BATCH_SIZE;
-    this.supportsRefresh = !config.kinabase.jwt;
+    this.#baseUrl = config.kinabase.baseUrl;
+    this.#tokenProvider = tokenProvider;
   }
 
+  async #authorizedRequest(method, path, body = null) {
+    const token = await this.#tokenProvider.getToken();
+    const url = `${this.#baseUrl}${path}`;
+
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    };
+
+    const options = {
+      method,
+      headers,
+    };
+
+    if (body) {
+      options.body = JSON.stringify(body);
+    }
+
+    return fetch(url, options);
+  }
+
+  /**
+   * Upserts records to Kinabase.
+   * For each machine, maintains a single record using external service tracking.
+   * @param {Array} records - Array of { data: {...} } objects
+   * @returns {Promise<{sent: number}>}
+   */
   async upsertRecords(records) {
-    if (!records.length) {
+    if (!records || !records.length) {
       return { sent: 0 };
     }
 
     let sent = 0;
-    const chunks = chunkRecords(records, this.maxBatchSize);
+    const collection = config.kinabase.collection;
 
-    for (const chunk of chunks) {
-      await this.#sendChunk(chunk);
-      sent += chunk.length;
+    for (const record of records) {
+      try {
+        // Use machine name as external ID for upsert behavior
+        const externalService = 'influxdb';
+        const externalId = record.data.machine || 'unknown';
+        
+        await this.#upsertSingleRecord(collection, externalService, externalId, record);
+        sent++;
+        
+        logger.debug(
+          { machine: externalId, data: record.data },
+          'Successfully upserted record to Kinabase'
+        );
+      } catch (error) {
+        logger.error(
+          { 
+            error: error.message,
+            machine: record.data?.machine,
+            stack: error.stack
+          },
+          'Failed to upsert record to Kinabase'
+        );
+        // Continue with next record instead of failing entire batch
+      }
     }
 
     return { sent };
   }
 
-  async #sendChunk(chunk) {
-    // Use the bulk endpoint for multiple records
-    const collection = config.kinabase.collection;
-    const endpoint = `/collections/${collection}/bulk`;
-    
-    // Send records array in BulkRecordInput format: { records: [{ data: {...} }, ...] }
-    const postBody = { records: chunk };
-
-    logger.debug(
-      { 
-        endpoint, 
-        recordCount: chunk.length,
-        sampleRecord: chunk[0]
-      }, 
-      'Sending batch to Kinabase'
-    );
+  async #upsertSingleRecord(collection, externalService, externalId, record) {
+    const endpoint = `/collections/${collection}/ext/${externalService}/${externalId}`;
 
     await pRetry(
       async () => {
-        const response = await this.#authorizedRequest('POST', endpoint, postBody);
+        const response = await this.#authorizedRequest('PATCH', endpoint, record);
 
         if (response.ok) {
-          logger.debug(
-            { count: chunk.length },
-            'Successfully sent Kinabase record batch'
-          );
           return;
         }
 
-        if (response.status === 409) {
-          await this.#handleConflicts(chunk, response);
+        // 404 means record doesn't exist, need to create it first
+        if (response.status === 404) {
+          await this.#createRecordWithExternal(collection, externalService, externalId, record);
           return;
+        }
+
+        if (response.status === 401) {
+          const body = await parseJsonSafely(response);
+          logger.error(
+            { 
+              status: 401,
+              body,
+              endpoint,
+              tokenPresent: !!(await this.#tokenProvider.getToken())
+            },
+            'Authentication failed - check JWT token validity and expiry'
+          );
+          const error = new Error('Authentication failed (401)');
+          error.name = 'AbortError';
+          throw error;
         }
 
         if (response.status >= 500) {
           const text = await response.text();
           throw new Error(
-            `Kinabase returned ${response.status} for POST /records: ${text}`
+            `Kinabase returned ${response.status} for PATCH ${endpoint}: ${text}`
           );
         }
 
@@ -143,13 +134,13 @@ export class KinabaseClient {
             status: response.status, 
             body,
             endpoint,
-            sampleRecord: chunk[0]
+            record
           },
-          'Kinabase rejected records payload'
+          'Kinabase rejected record'
         );
-        // Don't retry on client errors (4xx)
+        
         const error = new Error(
-          `Kinabase rejected payload with status ${response.status}`
+          `Kinabase rejected record with status ${response.status}`
         );
         error.name = 'AbortError';
         throw error;
@@ -160,108 +151,66 @@ export class KinabaseClient {
         factor: 2,
         onFailedAttempt: (error) => {
           logger.warn(
-            { attempt: error.attemptNumber, retriesLeft: error.retriesLeft },
-            `Retrying Kinabase POST batch after error: ${error.message}`
+            {
+              attemptNumber: error.attemptNumber,
+              retriesLeft: error.retriesLeft,
+              message: error.message,
+            },
+            'Retrying Kinabase upsert after error'
           );
         },
       }
     );
   }
 
-  async #handleConflicts(chunk, response) {
-    const body = await parseJsonSafely(response);
-    const conflictMap = extractConflictMap(body, chunk);
+  async #createRecordWithExternal(collection, externalService, externalId, record) {
+    // First create the record
+    const createEndpoint = `/collections/${collection}`;
+    const createResponse = await this.#authorizedRequest('POST', createEndpoint, record);
 
-    if (!conflictMap.size) {
-      logger.warn(
-        { body },
-        'Received 409 from Kinabase but could not extract conflicting record IDs; skipping updates'
+    if (!createResponse.ok) {
+      const body = await parseJsonSafely(createResponse);
+      throw new Error(
+        `Failed to create record: ${createResponse.status} - ${JSON.stringify(body)}`
       );
-      return;
     }
 
-    for (const record of chunk) {
-      const key = buildRecordKey(record.collection, record.fields);
-      const recordId = conflictMap.get(key);
+    const createdRecord = await createResponse.json();
+    const recordId = createdRecord.id;
 
-      if (!recordId) {
-        logger.warn(
-          { key, record },
-          'Missing record ID for conflicting record; skipping PATCH'
-        );
-        continue;
-      }
-
-      await this.#patchRecord(recordId, record);
+    if (!recordId) {
+      throw new Error('Created record but no ID returned');
     }
-  }
 
-  async #patchRecord(recordId, record) {
-    const path = `/records/${encodeURIComponent(recordId)}`;
-
-    await pRetry(
-      async () => {
-        const response = await this.#authorizedRequest('PATCH', path, record);
-
-        if (response.ok) {
-          logger.debug({ recordId }, 'Patched Kinabase record after conflict');
-          return;
+    // Now link it to external service by updating with external metadata
+    const recordWithExternal = {
+      data: record.data,
+      external: [
+        {
+          key: externalService,
+          id: externalId,
+          properties: {
+            source: 'influxdb-humidity-monitoring'
+          }
         }
-
-        if (response.status >= 500) {
-          const text = await response.text();
-          throw new Error(
-            `Kinabase returned ${response.status} for PATCH ${path}: ${text}`
-          );
-        }
-
-        const body = await parseJsonSafely(response);
-        logger.error(
-          { recordId, status: response.status, body },
-          'Kinabase PATCH failed; skipping record update'
-        );
-        throw new pRetry.AbortError(
-          `PATCH ${path} failed with status ${response.status}`
-        );
-      },
-      {
-        retries: 3,
-        minTimeout: 1000,
-        factor: 2,
-        onFailedAttempt: (error) => {
-          logger.warn(
-            { recordId, attempt: error.attemptNumber, retriesLeft: error.retriesLeft },
-            `Retrying PATCH after error: ${error.message}`
-          );
-        },
-      }
-    );
-  }
-
-  async #authorizedRequest(method, path, body) {
-    const attempt = async (options = {}) => {
-      const token = await this.tokenProvider(options);
-
-      const response = await fetch(kinabaseUrl(path), {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: body ? JSON.stringify(body) : undefined,
-      });
-
-      return response;
+      ]
     };
 
-    let response = await attempt();
+    const updateEndpoint = `/collections/${collection}/${recordId}`;
+    const updateResponse = await this.#authorizedRequest('PATCH', updateEndpoint, recordWithExternal);
 
-    if (response.status === 401 && this.supportsRefresh) {
-      logger.warn('Kinabase request unauthorized; attempting token refresh');
-      response = await attempt({ forceRefresh: true });
+    if (!updateResponse.ok) {
+      const body = await parseJsonSafely(updateResponse);
+      logger.warn(
+        { status: updateResponse.status, body },
+        'Created record but failed to link external ID'
+      );
     }
 
-    return response;
+    logger.info(
+      { recordId, externalId },
+      'Created new record and linked to external service'
+    );
   }
 }
 
