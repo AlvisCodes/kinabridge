@@ -12,8 +12,8 @@ sed -i '/^KINABASE_/d' .env
 cat >> .env << 'EOF'
 KINABASE_BASE_URL=http://localhost:3000/api/v1
 KINABASE_COLLECTION=sensor-readings
-KINABASE_API_KEY=9b8ac37a-40e5-4bf2-be6d-a9270c77231f
-KINABASE_API_SECRET=dHwT0Tg8fAKRuJGUS1vZfRz/RX0rQVhjGQbIVuxY+bzNGRKZ9NYmLlJ7blE8gTpbKyJVn3nheaHFXowAUKNx/w==
+KINABASE_API_KEY=354adc8f-a41c-4d8e-b3a5-6c37fe99bbe1
+KINABASE_API_SECRET=MKtGJ9Z8vI++DbLLmenUUp9qSai+PKl/nD2q2I7GJCz8KwFcXFTh83WBRTT5PJjLBBedu/VHfWYkODS1ebj4gg==
 EOF
 
 echo "✓ Updated .env with localhost Kinabase credentials"
