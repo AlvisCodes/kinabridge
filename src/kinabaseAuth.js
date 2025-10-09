@@ -20,7 +20,7 @@ const requestNewToken = async () => {
 
   const url = buildTokenUrl();
 
-  logger.debug('Requesting new Kinabase JWT using API key and secret');
+  logger.debug({ url, appId: apiKey }, 'Requesting new Kinabase JWT using API key and secret');
 
   const response = await fetch(url, {
     method: 'POST',
