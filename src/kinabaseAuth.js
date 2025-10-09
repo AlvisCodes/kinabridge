@@ -2,7 +2,7 @@ import fetch from 'node-fetch';
 import config from './config.js';
 import logger from './logger.js';
 
-const TOKEN_PATH = '/auth/token';
+const TOKEN_PATH = '/token';
 
 const buildTokenUrl = () => {
   const base = config.kinabase.baseUrl.replace(/\/+$/, '');
@@ -36,8 +36,10 @@ const requestNewToken = async () => {
 
   if (!response.ok) {
     const message = await response.text();
+    logger.error({ status: response.status, message }, 'Failed to generate JWT token');
     throw new Error(
-      `Failed to obtain Kinabase token (${response.status}): ${message}`
+      `Failed to obtain Kinabase token (${response.status}): ${message}\n` +
+      `Check your KINABASE_API_KEY and KINABASE_API_SECRET are correct.`
     );
   }
 
@@ -75,7 +77,7 @@ const requestNewToken = async () => {
  */
 export const createTokenProvider = () => {
   if (config.kinabase.jwt) {
-    logger.info('Using Kinabase JWT provided via environment variables');
+    logger.info('✓ Using manually provided JWT token from KINABASE_JWT');
     const token = config.kinabase.jwt;
     return async () => token;
   }
@@ -86,17 +88,23 @@ export const createTokenProvider = () => {
     );
   }
 
+  logger.info('✓ Using API Key/Secret authentication - tokens will be generated automatically');
+
   let cachedToken = null;
   let cachedExpiry = 0;
 
   return async ({ forceRefresh = false } = {}) => {
     if (!forceRefresh && cachedToken && Date.now() < cachedExpiry) {
+      logger.debug('Using cached token');
       return cachedToken;
     }
 
+    logger.info('Generating fresh JWT token from API Key/Secret...');
     const { token, expiryMs } = await requestNewToken();
     cachedToken = token;
     cachedExpiry = expiryMs;
+    const expiresInMinutes = Math.round((expiryMs - Date.now()) / 60000);
+    logger.info(`✓ New token generated, valid for ~${expiresInMinutes} minutes`);
     return cachedToken;
   };
 };

@@ -46,7 +46,10 @@ const kinabase = {
 
 if (!kinabase.jwt && !(kinabase.apiKey && kinabase.apiSecret)) {
   throw new Error(
-    'Provide either KINABASE_JWT or both KINABASE_API_KEY and KINABASE_API_SECRET'
+    'Kinabase authentication not configured!\n' +
+    'Provide either:\n' +
+    '  • KINABASE_JWT (manual token), OR\n' +
+    '  • KINABASE_API_KEY + KINABASE_API_SECRET (automatic token generation)'
   );
 }
 
