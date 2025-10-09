@@ -4,8 +4,9 @@ Node.js bridge that reads humidity sensor data from the Shoestring HumidityMonit
 
 ## Setup
 
-- Copy the project to the Raspberry Pi (e.g. `/home/pi/kinabase-bridge`).
-- Run `npm install`.
+- Install Node.js 18.x on the host (Raspberry Pi: `curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash - && sudo apt install -y nodejs`).
+- Copy/clone the project to the target path (e.g. `/home/pi/kinabridge`).
+- Run `npm install --omit=dev`.
 - Create `.env` by copying `.env.example` and filling in the credentials:
   - `INFLUX_URL`, `INFLUX_ORG`, `INFLUX_BUCKET`, `INFLUX_READ_TOKEN`: existing InfluxDB details from Shoestring deployment.
   - Either provide `KINABASE_JWT` directly or set `KINABASE_API_KEY` and `KINABASE_API_SECRET` so the bridge can request a JWT.
@@ -16,6 +17,8 @@ Node.js bridge that reads humidity sensor data from the Shoestring HumidityMonit
   - `CONTROL_PORT` (optional) exposes the web dashboard that toggles the bridge (default `4300`).
   - Optional `KINABASE_BASE_URL` lets you override the Kinabase API base if you are targeting a non-default environment.
 - Run `npm start` to launch the continuous poller. Use `npm run dev` to execute a single polling cycle for testing.
+
+See `SETUP.md` for a full walkthrough and Raspberry Pi service recommendations.
 
 ## Control Dashboard
 
