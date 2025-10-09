@@ -40,7 +40,8 @@ const kinabase = {
   collection: requiredEnv('KINABASE_COLLECTION'),
   apiKey: process.env.KINABASE_API_KEY,
   apiSecret: process.env.KINABASE_API_SECRET,
-  jwt: process.env.KINABASE_JWT,
+  // Trim JWT token to remove any accidental whitespace
+  jwt: process.env.KINABASE_JWT ? process.env.KINABASE_JWT.trim() : undefined,
 };
 
 if (!kinabase.jwt && !(kinabase.apiKey && kinabase.apiSecret)) {
