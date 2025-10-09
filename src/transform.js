@@ -22,21 +22,19 @@ export const toKinabaseRecords = (records) => {
     // Build the data object with all fields
     const data = {
       machine: record.machine,
-      Timestamp: record.timestamp,
+      timestamp: record.timestamp,
       source: record.source || 'shoestring-humidity-monitoring',
     };
 
     // Add sensor readings (temperature, humidity, pressure)
     for (const [fieldName, value] of Object.entries(record.fields || {})) {
       if (isNumber(value)) {
-        // Capitalize first letter to match Kinabase field naming
-        const capitalizedFieldName = fieldName.charAt(0).toUpperCase() + fieldName.slice(1);
-        data[capitalizedFieldName] = value;
+        // Use lowercase field names to match Kinabase schema
+        data[fieldName] = value;
       } else if (value != null) {
         const numeric = Number.parseFloat(value);
         if (Number.isFinite(numeric)) {
-          const capitalizedFieldName = fieldName.charAt(0).toUpperCase() + fieldName.slice(1);
-          data[capitalizedFieldName] = numeric;
+          data[fieldName] = numeric;
         } else {
           logger.debug(
             { fieldName, value },
