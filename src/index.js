@@ -16,8 +16,23 @@ import {
 const args = process.argv.slice(2);
 const runOnce = args.includes('--once') || args.includes('--run-once');
 
+// Create and validate token provider
 const tokenProvider = createTokenProvider();
 const kinabaseClient = new KinabaseClient({ tokenProvider });
+
+// Validate tokenProvider works correctly at startup
+(async () => {
+  try {
+    const token = await tokenProvider();
+    if (!token || typeof token !== 'string') {
+      throw new Error('tokenProvider returned invalid token');
+    }
+    logger.info('Token provider initialized successfully');
+  } catch (error) {
+    logger.error({ err: error }, 'Failed to initialize token provider - check your Kinabase credentials');
+    process.exit(1);
+  }
+})();
 
 let isPolling = false;
 let interrupted = false;

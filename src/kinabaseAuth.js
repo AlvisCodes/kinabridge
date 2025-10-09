@@ -58,6 +58,21 @@ const requestNewToken = async () => {
   };
 };
 
+/**
+ * Creates a token provider function for Kinabase authentication.
+ * 
+ * @returns {Function} An async function that returns a JWT token string.
+ *   - If KINABASE_JWT is set, returns that token directly.
+ *   - Otherwise, fetches and caches tokens using API key/secret.
+ *   - The function accepts an optional { forceRefresh: boolean } parameter.
+ * 
+ * @throws {Error} If neither JWT nor API key/secret are configured.
+ * 
+ * @example
+ * const tokenProvider = createTokenProvider();
+ * const token = await tokenProvider(); // Returns JWT string
+ * const freshToken = await tokenProvider({ forceRefresh: true });
+ */
 export const createTokenProvider = () => {
   if (config.kinabase.jwt) {
     logger.info('Using Kinabase JWT provided via environment variables');

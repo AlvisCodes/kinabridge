@@ -19,36 +19,13 @@ class KinabaseClient {
   #baseUrl;
   #tokenProvider;
 
-  /**
-   * Creates a new KinabaseClient instance.
-   * 
-   * @param {Object} options
-   * @param {Function} options.tokenProvider - An async function that returns a JWT token string.
-   *   This should be the function returned by createTokenProvider() from kinabaseAuth.js.
-   *   Do NOT pass an object with a getToken method - pass the function directly.
-   * 
-   * @throws {TypeError} If tokenProvider is not a function.
-   * 
-   * @example
-   * import { createTokenProvider } from './kinabaseAuth.js';
-   * const tokenProvider = createTokenProvider();
-   * const client = new KinabaseClient({ tokenProvider });
-   */
   constructor({ tokenProvider }) {
     this.#baseUrl = config.kinabase.baseUrl;
-    
-    // Validate tokenProvider is a function
-    if (typeof tokenProvider !== 'function') {
-      throw new TypeError(
-        'tokenProvider must be a function that returns a Promise<string> (the JWT token)'
-      );
-    }
-    
     this.#tokenProvider = tokenProvider;
   }
 
   async #authorizedRequest(method, path, body = null) {
-    const token = await this.#tokenProvider();
+    const token = await this.#tokenProvider.getToken();
     const url = `${this.#baseUrl}${path}`;
 
     const headers = {
@@ -135,7 +112,7 @@ class KinabaseClient {
               status: 401,
               body,
               endpoint,
-              tokenPresent: !!(await this.#tokenProvider())
+              tokenPresent: !!(await this.#tokenProvider.getToken())
             },
             'Authentication failed - check JWT token validity and expiry'
           );
@@ -234,6 +211,194 @@ class KinabaseClient {
       { recordId, externalId },
       'Created new record and linked to external service'
     );
+  }
+}
+
+export default KinabaseClient;
+
+
+  async upsertRecords(records) {
+    if (!records.length) {
+      return { sent: 0 };
+    }
+
+    let sent = 0;
+    const chunks = chunkRecords(records, this.maxBatchSize);
+
+    for (const chunk of chunks) {
+      await this.#sendChunk(chunk);
+      sent += chunk.length;
+    }
+
+    return { sent };
+  }
+
+  async #sendChunk(chunk) {
+    // Use the bulk endpoint for multiple records
+    const collection = config.kinabase.collection;
+    const endpoint = `/collections/${collection}/bulk`;
+    
+    // Send records array in BulkRecordInput format: { records: [{ data: {...} }, ...] }
+    const postBody = { records: chunk };
+
+    logger.debug(
+      { 
+        endpoint, 
+        recordCount: chunk.length,
+        sampleRecord: chunk[0]
+      }, 
+      'Sending batch to Kinabase'
+    );
+
+    await pRetry(
+      async () => {
+        const response = await this.#authorizedRequest('POST', endpoint, postBody);
+
+        if (response.ok) {
+          logger.debug(
+            { count: chunk.length },
+            'Successfully sent Kinabase record batch'
+          );
+          return;
+        }
+
+        if (response.status === 409) {
+          await this.#handleConflicts(chunk, response);
+          return;
+        }
+
+        if (response.status >= 500) {
+          const text = await response.text();
+          throw new Error(
+            `Kinabase returned ${response.status} for POST /records: ${text}`
+          );
+        }
+
+        const body = await parseJsonSafely(response);
+        logger.error(
+          { 
+            status: response.status, 
+            body,
+            endpoint,
+            sampleRecord: chunk[0]
+          },
+          'Kinabase rejected records payload'
+        );
+        // Don't retry on client errors (4xx)
+        const error = new Error(
+          `Kinabase rejected payload with status ${response.status}`
+        );
+        error.name = 'AbortError';
+        throw error;
+      },
+      {
+        retries: 3,
+        minTimeout: 1000,
+        factor: 2,
+        onFailedAttempt: (error) => {
+          logger.warn(
+            { attempt: error.attemptNumber, retriesLeft: error.retriesLeft },
+            `Retrying Kinabase POST batch after error: ${error.message}`
+          );
+        },
+      }
+    );
+  }
+
+  async #handleConflicts(chunk, response) {
+    const body = await parseJsonSafely(response);
+    const conflictMap = extractConflictMap(body, chunk);
+
+    if (!conflictMap.size) {
+      logger.warn(
+        { body },
+        'Received 409 from Kinabase but could not extract conflicting record IDs; skipping updates'
+      );
+      return;
+    }
+
+    for (const record of chunk) {
+      const key = buildRecordKey(record.collection, record.fields);
+      const recordId = conflictMap.get(key);
+
+      if (!recordId) {
+        logger.warn(
+          { key, record },
+          'Missing record ID for conflicting record; skipping PATCH'
+        );
+        continue;
+      }
+
+      await this.#patchRecord(recordId, record);
+    }
+  }
+
+  async #patchRecord(recordId, record) {
+    const path = `/records/${encodeURIComponent(recordId)}`;
+
+    await pRetry(
+      async () => {
+        const response = await this.#authorizedRequest('PATCH', path, record);
+
+        if (response.ok) {
+          logger.debug({ recordId }, 'Patched Kinabase record after conflict');
+          return;
+        }
+
+        if (response.status >= 500) {
+          const text = await response.text();
+          throw new Error(
+            `Kinabase returned ${response.status} for PATCH ${path}: ${text}`
+          );
+        }
+
+        const body = await parseJsonSafely(response);
+        logger.error(
+          { recordId, status: response.status, body },
+          'Kinabase PATCH failed; skipping record update'
+        );
+        throw new pRetry.AbortError(
+          `PATCH ${path} failed with status ${response.status}`
+        );
+      },
+      {
+        retries: 3,
+        minTimeout: 1000,
+        factor: 2,
+        onFailedAttempt: (error) => {
+          logger.warn(
+            { recordId, attempt: error.attemptNumber, retriesLeft: error.retriesLeft },
+            `Retrying PATCH after error: ${error.message}`
+          );
+        },
+      }
+    );
+  }
+
+  async #authorizedRequest(method, path, body) {
+    const attempt = async (options = {}) => {
+      const token = await this.tokenProvider(options);
+
+      const response = await fetch(kinabaseUrl(path), {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+
+      return response;
+    };
+
+    let response = await attempt();
+
+    if (response.status === 401 && this.supportsRefresh) {
+      logger.warn('Kinabase request unauthorized; attempting token refresh');
+      response = await attempt({ forceRefresh: true });
+    }
+
+    return response;
   }
 }
 
