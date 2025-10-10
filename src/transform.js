@@ -4,6 +4,14 @@ import logger from './logger.js';
 // Maps the combined InfluxDB field set into the Kinabase collection fields.
 // Follows the APIRecord schema: { data: { field1: value1, field2: value2, ... } }
 
+// Map InfluxDB field names to Kinabase field names
+// (Kinabase field names must match the collection schema exactly)
+const FIELD_NAME_MAPPING = {
+  'temperature': 'Temperature',  // Capitalized to match Kinabase schema
+  'humidity': 'Humidity',
+  'pressure': 'Pressure',
+};
+
 const isNumber = (value) =>
   typeof value === 'number' && Number.isFinite(value);
 
@@ -27,14 +35,17 @@ export const toKinabaseRecords = (records) => {
     };
 
     // Add sensor readings (temperature, humidity, pressure)
+    // Map InfluxDB field names to Kinabase field names
     for (const [fieldName, value] of Object.entries(record.fields || {})) {
       if (isNumber(value)) {
-        // Use lowercase field names to match Kinabase schema
-        data[fieldName] = value;
+        // Map to Kinabase field name (e.g., temperature -> Tempreture)
+        const kinabaseFieldName = FIELD_NAME_MAPPING[fieldName] || fieldName;
+        data[kinabaseFieldName] = value;
       } else if (value != null) {
         const numeric = Number.parseFloat(value);
         if (Number.isFinite(numeric)) {
-          data[fieldName] = numeric;
+          const kinabaseFieldName = FIELD_NAME_MAPPING[fieldName] || fieldName;
+          data[kinabaseFieldName] = numeric;
         } else {
           logger.debug(
             { fieldName, value },
@@ -44,20 +55,19 @@ export const toKinabaseRecords = (records) => {
       }
     }
 
-    // Log what fields are in the final payload
-    logger.info(
-      { 
-        machine: data.machine,
-        fields: Object.keys(data).filter(k => k !== 'machine' && k !== 'timestamp' && k !== 'source')
-      },
-      'Transformed record fields for Kinabase'
-    );
-
     // Wrap in APIRecord format: { data: { ... } }
     payload.push({
       data
     });
   }
+
+  logger.debug(
+    { 
+      count: payload.length,
+      sampleFields: payload[0] ? Object.keys(payload[0].data) : []
+    },
+    'Transformed records for Kinabase'
+  );
 
   return payload;
 };

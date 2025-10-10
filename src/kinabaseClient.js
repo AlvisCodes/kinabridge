@@ -166,13 +166,13 @@ class KinabaseClient {
     const endpoint = `/collections/${collection}/${recordId}`;
     const machine = record.data.machine;
     
-    logger.info(
+    logger.debug(
       { 
         recordId, 
         machine, 
-        data: record.data 
+        fields: Object.keys(record.data)
       }, 
-      'Updating record with data...'
+      'Updating record...'
     );
 
     await pRetry(
@@ -252,12 +252,12 @@ class KinabaseClient {
     const endpoint = `/collections/${collection}`;
     const machine = record.data?.machine;
     
-    logger.info(
+    logger.debug(
       { 
         machine, 
-        data: record.data 
+        fields: Object.keys(record.data)
       }, 
-      'Creating new record with data...'
+      'Creating new record...'
     );
 
     await pRetry(

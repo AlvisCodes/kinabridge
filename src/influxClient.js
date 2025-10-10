@@ -96,20 +96,10 @@ from(bucket: "${config.influx.bucket}")
     {
       count: sortedRecords.length,
       latestTimestamp,
+      sampleFields: sortedRecords[0] ? Object.keys(sortedRecords[0].fields) : []
     },
     'Fetched records from InfluxDB'
   );
-
-  // Log sample record to see what fields we're getting
-  if (sortedRecords.length > 0) {
-    logger.info(
-      { 
-        sampleRecord: sortedRecords[0],
-        fields: Object.keys(sortedRecords[0].fields)
-      },
-      'Sample InfluxDB record with fields'
-    );
-  }
 
   return {
     records: sortedRecords,
