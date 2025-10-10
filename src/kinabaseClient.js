@@ -12,8 +12,7 @@ const parseJsonSafely = async (response) => {
 };
 
 /**
- * Kinabase client for upserting sensor readings.
- * Uses external service tracking to maintain one record per machine.
+ * Kinabase client for creating sensor reading records.
  */
 class KinabaseClient {
   #baseUrl;
@@ -69,8 +68,8 @@ class KinabaseClient {
   }
 
   /**
-   * Upserts records to Kinabase.
-   * Creates new records for each data point.
+   * Creates new records in Kinabase.
+   * Each sensor reading becomes a separate record.
    * @param {Array} records - Array of { data: {...} } objects
    * @returns {Promise<{sent: number}>}
    */
@@ -115,10 +114,6 @@ class KinabaseClient {
     await pRetry(
       async () => {
         const response = await this.#authorizedRequest('POST', endpoint, record);
-
-        if (response.ok) {
-          return;
-        }
 
         if (response.ok) {
           return;

@@ -16,97 +16,8 @@ import {
 const args = process.argv.slice(2);
 const runOnce = args.includes('--once') || args.includes('--run-once');
 
-// Create and validate token provider
-const tokenProvider = createTokenProvider();
-const kinabaseClient = new KinabaseClient({ tokenProvider });
-
-// Validate tokenProvider works correctly at startup
-(async () => {
-  try {
-    const token = await tokenProvider();
-    if (!token || typeof token !== 'string') {
-      throw new Error('tokenProvider returned invalid token');
-    }
-    logger.info('Token provider initialized successfully');
-  } catch (error) {
-    logger.error({ err: error }, 'Failed to initialize token provider - check your Kinabase credentials');
-    process.exit(1);
-  }
-})();
-
 let isPolling = false;
 let interrupted = false;
-
-const pollOnce = async () => {
-  if (isPolling) {
-    logger.warn('Skipping poll because previous cycle is still running');
-    return;
-  }
-
-  isPolling = true;
-
-  try {
-    const state = await loadState();
-
-    if (!state.bridgeEnabled) {
-      logger.info('Bridge toggled off; skipping Kinabase sync this cycle');
-      return;
-    }
-
-    const lastTimestamp = state.lastTimestamp;
-
-    logger.debug(
-      { lastTimestamp },
-      'Starting Kinabase bridge poll cycle'
-    );
-
-    const { records, latestTimestamp } = await fetchNewPoints({
-      since: lastTimestamp,
-    });
-
-    if (!records.length) {
-      logger.info('No new humidity sensor records to process');
-      return;
-    }
-
-    const kinabaseRecords = toKinabaseRecords(records);
-
-    if (!kinabaseRecords.length) {
-      logger.warn(
-        'Fetched records but nothing was transformed for Kinabase; check transform rules'
-      );
-      if (latestTimestamp) {
-        await setLastTimestamp(latestTimestamp);
-      }
-      return;
-    }
-
-    let sent = 0;
-    try {
-      const result = await kinabaseClient.upsertRecords(kinabaseRecords);
-      sent = result.sent;
-      recordKinabaseSuccess();
-    } catch (error) {
-      recordKinabaseFailure(error);
-      throw error;
-    }
-
-    if (sent > 0 && latestTimestamp) {
-      await setLastTimestamp(latestTimestamp);
-      logger.info(
-        { sent, latestTimestamp },
-        'Uploaded records to Kinabase and updated state'
-      );
-    } else {
-      logger.info('No records sent to Kinabase during this cycle');
-    }
-  } catch (error) {
-    recordKinabaseFailure(error);
-    logger.error({ err: error }, 'Kinabase bridge poller encountered an error');
-  } finally {
-    isPolling = false;
-  }
-};
 
 const handleExit = async (signal) => {
   if (interrupted) {
@@ -139,15 +50,102 @@ startControlServer({
 });
 
 const start = async () => {
+  // Create and validate token provider at startup
+  const tokenProvider = createTokenProvider();
+  const kinabaseClient = new KinabaseClient({ tokenProvider });
+
+  try {
+    const token = await tokenProvider();
+    if (!token || typeof token !== 'string') {
+      throw new Error('tokenProvider returned invalid token');
+    }
+    logger.info('✓ Token provider initialized successfully');
+  } catch (error) {
+    logger.error({ err: error }, 'Failed to initialize token provider - check your Kinabase credentials');
+    throw error;
+  }
+
+  // Start polling
+  const poll = async () => {
+    if (isPolling) {
+      logger.warn('Skipping poll because previous cycle is still running');
+      return;
+    }
+
+    isPolling = true;
+
+    try {
+      const state = await loadState();
+
+      if (!state.bridgeEnabled) {
+        logger.info('Bridge toggled off; skipping Kinabase sync this cycle');
+        return;
+      }
+
+      const lastTimestamp = state.lastTimestamp;
+
+      logger.debug(
+        { lastTimestamp },
+        'Starting Kinabase bridge poll cycle'
+      );
+
+      const { records, latestTimestamp } = await fetchNewPoints({
+        since: lastTimestamp,
+      });
+
+      if (!records.length) {
+        logger.info('No new humidity sensor records to process');
+        return;
+      }
+
+      const kinabaseRecords = toKinabaseRecords(records);
+
+      if (!kinabaseRecords.length) {
+        logger.warn(
+          'Fetched records but nothing was transformed for Kinabase; check transform rules'
+        );
+        if (latestTimestamp) {
+          await setLastTimestamp(latestTimestamp);
+        }
+        return;
+      }
+
+      let sent = 0;
+      try {
+        const result = await kinabaseClient.upsertRecords(kinabaseRecords);
+        sent = result.sent;
+        recordKinabaseSuccess();
+      } catch (error) {
+        recordKinabaseFailure(error);
+        throw error;
+      }
+
+      if (sent > 0 && latestTimestamp) {
+        await setLastTimestamp(latestTimestamp);
+        logger.info(
+          { sent, latestTimestamp },
+          'Uploaded records to Kinabase and updated state'
+        );
+      } else {
+        logger.info('No records sent to Kinabase during this cycle');
+      }
+    } catch (error) {
+      recordKinabaseFailure(error);
+      logger.error({ err: error }, 'Kinabase bridge poller encountered an error');
+    } finally {
+      isPolling = false;
+    }
+  };
+
   if (runOnce) {
-    await pollOnce();
+    await poll();
     return;
   }
 
-  await pollOnce();
+  await poll();
 
   setInterval(async () => {
-    await pollOnce();
+    await poll();
   }, config.pollIntervalMs);
 };
 
