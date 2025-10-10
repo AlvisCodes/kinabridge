@@ -7,20 +7,24 @@ cp .env .env.backup
 
 # Remove old Kinabase settings
 sed -i '/^KINABASE_/d' .env
+sed -i '/^POLL_INTERVAL_MS=/d' .env
 
-# Add correct Kinabase settings with JWT token
+# Add correct Kinabase settings for beta.kinabase.com
 cat >> .env << 'EOF'
-KINABASE_BASE_URL=http://10.10.11.25:3000/api/v1
+KINABASE_BASE_URL=https://beta.kinabase.com/api/v1
 KINABASE_COLLECTION=afcbe9dd-0ffe-4d21-a1bd-c6568cc87e92
-KINABASE_JWT=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJmOTg0ZGU2Ni05NDM1LTRiYTYtYmFjYy01NWJjYzczYjVjYjUiLCJ0bnRpZCI6IjA4MWQxY2M4LWRhNTEtNDU1Ny1hODgwLTFmZWI5ZTIxMzFiNCIsImFwcGlkIjoiMzU0YWRjOGYtYTQxYy00ZDhlLWIzYTUtNmMzN2ZlOTliYmUxIiwiZXhwIjoxNzYwMDMwMDg5LCJpc3MiOiJsb2NhbGhvc3QiLCJhdWQiOiJraW5hYmFzZS5jbGllbnQifQ.PeOSnkY0qwO4kjl3UnTOih-P2WtGObGKhLfCgsUVHCw
-KINABASE_API_KEY=354adc8f-a41c-4d8e-b3a5-6c37fe99bbe1
-KINABASE_API_SECRET=MKtGJ9Z8vI++DbLLmenUUp9qSai+PKl/nD2q2I7GJCz8KwFcXFTh83WBRTT5PJjLBBedu/VHfWYkODS1ebj4gg==
+KINABASE_JWT=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlNmJmNThmOS0wZWExLTQ2YzgtYTI2My00MmZmNzMyOTdjNDciLCJ0bnRpZCI6Ijk1NDJhMzE3LTQwZTUtNDk4Zi04ZDExLWRjZDFhM2UwNTI5ZCIsImFwcGlkIjoiZmYwM2Q5OWQtZGYyNC00ZjY0LWE5MjItZjE0ODZiMGVjZGZiIiwiZXhwIjoxNzYwMDg5MTUxLCJpc3MiOiJsb2NhbGhvc3QiLCJhdWQiOiJraW5hYmFzZS5jbGllbnQifQ.mBdGa3tAMVmXHidCg_uH4Me108hMN7dVWxyQck2dGw0
+KINABASE_API_KEY=ff03d99d-df24-4f64-a922-f1486b0ecdfb
+KINABASE_API_SECRET=RzNygfnluStVLJ0QbrAT6btPRDbm0Xs8YCFTLd3r8Kw2Ndx/hoKUQqrDtIg/hpRrSq7jLUcWdVV/cNdfLClYOA==
+POLL_INTERVAL_MS=300000
 EOF
 
-echo "✓ Updated .env with JWT token and API credentials"
+echo "✓ Updated .env with beta.kinabase.com credentials"
+echo "✓ Poll interval set to 5 minutes (300000ms)"
 echo "✓ Backup saved to .env.backup"
 echo ""
 echo "New Kinabase settings:"
 grep "^KINABASE_" .env
+grep "^POLL_INTERVAL_MS=" .env
 echo ""
 echo "Now restart your app manually"

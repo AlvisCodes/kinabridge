@@ -1,8 +1,8 @@
 import fetch from 'node-fetch';
 
-const KINABASE_BASE_URL = 'http://localhost:3000/api/v1';
-const APP_ID = '354adc8f-a41c-4d8e-b3a5-6c37fe99bbe1';
-const APP_SECRET = 'MKtGJ9Z8vI++DbLLmenUUp9qSai+PKl/nD2q2I7GJCz8KwFcXFTh83WBRTT5PJjLBBedu/VHfWYkODS1ebj4gg==';
+const KINABASE_BASE_URL = 'https://beta.kinabase.com/api/v1';
+const APP_ID = 'ff03d99d-df24-4f64-a922-f1486b0ecdfb';
+const APP_SECRET = 'RzNygfnluStVLJ0QbrAT6btPRDbm0Xs8YCFTLd3r8Kw2Ndx/hoKUQqrDtIg/hpRrSq7jLUcWdVV/cNdfLClYOA==';
 
 async function generateToken() {
   try {
