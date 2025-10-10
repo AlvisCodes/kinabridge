@@ -15,11 +15,11 @@ KINABASE_BASE_URL=https://beta.kinabase.com/api/v1
 KINABASE_COLLECTION=sensor-readings
 KINABASE_API_KEY=ff03d99d-df24-4f64-a922-f1486b0ecdfb
 KINABASE_API_SECRET=RzNygfnluStVLJ0QbrAT6btPRDbm0Xs8YCFTLd3r8Kw2Ndx/hoKUQqrDtIg/hpRrSq7jLUcWdVV/cNdfLClYOA==
-POLL_INTERVAL_MS=120000
+POLL_INTERVAL_MS=60000
 EOF
 
 echo "✓ Updated .env with beta.kinabase.com credentials"
-echo "✓ Poll interval set to 2 minutes (120000ms)"
+echo "✓ Poll interval set to 1 minute (60000ms)"
 echo "✓ Using API Key/Secret for automatic token refresh"
 echo "✓ Backup saved to .env.backup"
 echo ""

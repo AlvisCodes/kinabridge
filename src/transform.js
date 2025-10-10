@@ -44,6 +44,15 @@ export const toKinabaseRecords = (records) => {
       }
     }
 
+    // Log what fields are in the final payload
+    logger.info(
+      { 
+        machine: data.machine,
+        fields: Object.keys(data).filter(k => k !== 'machine' && k !== 'timestamp' && k !== 'source')
+      },
+      'Transformed record fields for Kinabase'
+    );
+
     // Wrap in APIRecord format: { data: { ... } }
     payload.push({
       data
