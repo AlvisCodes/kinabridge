@@ -101,17 +101,11 @@ class KinabaseClient {
       try {
         await this.#upsertRecord(collection, record);
         sent++;
-        
-        logger.debug(
-          { machine, data: record.data },
-          'Successfully upserted record in Kinabase'
-        );
       } catch (error) {
         logger.error(
           { 
             error: error.message,
             machine,
-            stack: error.stack
           },
           'Failed to upsert record in Kinabase'
         );
@@ -119,6 +113,7 @@ class KinabaseClient {
       }
     }
 
+    logger.info({ sent, machines: sent }, `✓ Synced ${sent} machine(s) to Kinabase`);
     return { sent };
   }
 
@@ -169,15 +164,16 @@ class KinabaseClient {
 
   async #updateRecord(collection, recordId, record) {
     const endpoint = `/collections/${collection}/${recordId}`;
+    const machine = record.data.machine;
     
-    logger.debug({ endpoint, collection, recordId, machine: record.data.machine }, 'Updating existing record in Kinabase');
+    logger.debug({ recordId, machine }, 'Updating record...');
 
     await pRetry(
       async () => {
         const response = await this.#authorizedRequest('PATCH', endpoint, record);
 
         if (response.ok) {
-          logger.info({ recordId, machine: record.data.machine }, 'Updated existing record');
+          logger.info({ recordId, machine }, '✓ Updated record');
           return;
         }
 
@@ -247,8 +243,9 @@ class KinabaseClient {
 
   async #createRecord(collection, record) {
     const endpoint = `/collections/${collection}`;
+    const machine = record.data?.machine;
     
-    logger.debug({ endpoint, collection, machine: record.data?.machine }, 'Creating new record in Kinabase');
+    logger.debug({ machine }, 'Creating new record...');
 
     await pRetry(
       async () => {
@@ -256,7 +253,7 @@ class KinabaseClient {
 
         if (response.ok) {
           const body = await parseJsonSafely(response);
-          logger.info({ recordId: body?.id, machine: record.data.machine }, 'Created new record');
+          logger.info({ recordId: body?.id, machine }, '✓ Created new record');
           return;
         }
 

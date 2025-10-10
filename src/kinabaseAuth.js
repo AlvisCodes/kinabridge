@@ -1,3 +1,18 @@
+/**
+ * Kinabase Authentication Module
+ * 
+ * This module handles JWT token generation and automatic refresh for Kinabase API authentication.
+ * 
+ * Features:
+ * - Automatically generates JWT tokens from API Key/Secret
+ * - Caches tokens and refreshes them 1 minute before expiry
+ * - Runs indefinitely without manual token management
+ * 
+ * Configuration:
+ * - Set KINABASE_API_KEY and KINABASE_API_SECRET in .env for auto-refresh
+ * - OR set KINABASE_JWT for manual token (no auto-refresh)
+ */
+
 import fetch from 'node-fetch';
 import config from './config.js';
 import logger from './logger.js';
@@ -50,8 +65,14 @@ const requestNewToken = async () => {
   const token = payload.token || payload.jwt;
   const expiresIn = payload.expiresIn || payload.expires_in;
   const expiryMs = expiresIn
-    ? Date.now() + Number(expiresIn) * 1000 - 60_000
-    : Date.now() + 50 * 60 * 1000;
+    ? Date.now() + Number(expiresIn) * 1000 - 60_000 // Refresh 1 minute before expiry
+    : Date.now() + 50 * 60 * 1000; // Default: 50 minutes
+
+  const expiryDate = new Date(expiryMs + 60_000); // Add back the 1 minute buffer for display
+  logger.info(
+    { expiresAt: expiryDate.toISOString(), expiresInSeconds: expiresIn },
+    '✓ JWT token received, will auto-refresh before expiry'
+  );
 
   return {
     token,
@@ -93,17 +114,23 @@ export const createTokenProvider = () => {
   let cachedExpiry = 0;
 
   return async ({ forceRefresh = false } = {}) => {
-    if (!forceRefresh && cachedToken && Date.now() < cachedExpiry) {
-      logger.debug('Using cached token');
+    const now = Date.now();
+    
+    if (!forceRefresh && cachedToken && now < cachedExpiry) {
+      const timeUntilExpiry = Math.round((cachedExpiry - now) / 60000);
+      logger.debug(`Using cached token (expires in ~${timeUntilExpiry} minutes)`);
       return cachedToken;
     }
 
-    logger.info('Generating fresh JWT token from API Key/Secret...');
+    if (cachedToken) {
+      logger.info('🔄 Token expired or expiring soon, refreshing automatically...');
+    } else {
+      logger.info('🔑 Generating initial JWT token from API Key/Secret...');
+    }
+    
     const { token, expiryMs } = await requestNewToken();
     cachedToken = token;
     cachedExpiry = expiryMs;
-    const expiresInMinutes = Math.round((expiryMs - Date.now()) / 60000);
-    logger.info(`✓ New token generated, valid for ~${expiresInMinutes} minutes`);
     return cachedToken;
   };
 };

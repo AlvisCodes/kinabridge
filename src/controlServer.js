@@ -77,10 +77,12 @@ export const startControlServer = ({
 
   app.listen(port, () => {
     logger.info(
-      { port },
+      { port, url: `http://localhost:${port}` },
       'Kinabase bridge control UI available'
     );
   });
+
+  return { port };
 };
 
 export default startControlServer;

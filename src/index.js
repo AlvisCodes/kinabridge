@@ -1,4 +1,5 @@
 import process from 'process';
+import { exec } from 'child_process';
 import config from './config.js';
 import logger from './logger.js';
 import { loadState, setLastTimestamp, setBridgeEnabled } from './stateStore.js';
@@ -15,9 +16,35 @@ import {
 
 const args = process.argv.slice(2);
 const runOnce = args.includes('--once') || args.includes('--run-once');
+const noBrowser = args.includes('--no-browser');
 
 let isPolling = false;
 let interrupted = false;
+
+/**
+ * Opens a URL in the default browser.
+ * Works cross-platform (macOS, Linux, Windows).
+ */
+const openBrowser = (url) => {
+  const platform = process.platform;
+  let command;
+
+  if (platform === 'darwin') {
+    command = `open ${url}`;
+  } else if (platform === 'win32') {
+    command = `start ${url}`;
+  } else {
+    command = `xdg-open ${url}`;
+  }
+
+  exec(command, (error) => {
+    if (error) {
+      logger.debug({ err: error }, 'Could not auto-open browser');
+    } else {
+      logger.info(`✓ Opened ${url} in browser`);
+    }
+  });
+};
 
 const handleExit = async (signal) => {
   if (interrupted) {
@@ -43,11 +70,19 @@ const handleExit = async (signal) => {
 process.on('SIGINT', handleExit);
 process.on('SIGTERM', handleExit);
 
-startControlServer({
+// Start the control server and optionally open browser
+const { port } = startControlServer({
   stateProvider: loadState,
   setBridgeEnabled,
   statusProvider: getKinabaseStatus,
 });
+
+if (!runOnce && !noBrowser) {
+  // Wait a moment for server to be ready, then open browser
+  setTimeout(() => {
+    openBrowser(`http://localhost:${port}`);
+  }, 1000);
+}
 
 const start = async () => {
   // Create and validate token provider at startup
@@ -142,7 +177,16 @@ const start = async () => {
     return;
   }
 
+  // Run initial poll
+  logger.info('🚀 Starting Kinabase bridge - initial sync...');
   await poll();
+
+  // Set up recurring polling
+  const intervalMinutes = Math.round(config.pollIntervalMs / 60000);
+  logger.info(
+    { intervalMs: config.pollIntervalMs, intervalMinutes },
+    `📊 Polling every ${intervalMinutes} minute(s) for sensor updates`
+  );
 
   setInterval(async () => {
     await poll();
