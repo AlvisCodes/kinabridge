@@ -57,8 +57,8 @@ from(bucket: "${config.influx.bucket}")
       continue;
     }
 
-    const machine =
-      row.machine || row.machine_id || row.machineName || row.device || 'unknown';
+    // Use hardcoded machine name, ignore InfluxDB machine fields
+    const machine = config.machineName;
     const key = `${machine}|${timeIso}`;
 
     if (!grouped.has(key)) {

@@ -55,6 +55,7 @@ if (!kinabase.jwt && !(kinabase.apiKey && kinabase.apiSecret)) {
 
 const pollIntervalMs = parseIntegerEnv('POLL_INTERVAL_MS', 5000);
 const stateFile = process.env.STATE_FILE || './last-run.json';
+const machineName = 'EnvironmentalSensor';
 
 const config = {
   influx,
@@ -62,6 +63,7 @@ const config = {
   pollIntervalMs,
   stateFile,
   logLevel,
+  machineName,
   defaultLookbackMs: parseIntegerEnv('DEFAULT_LOOKBACK_MS', 15 * 60 * 1000),
   controlPort: parseIntegerEnv('CONTROL_PORT', 4300),
 };
