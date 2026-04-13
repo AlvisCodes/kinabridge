@@ -54,7 +54,7 @@ if (!kinabase.jwt && !(kinabase.apiKey && kinabase.apiSecret)) {
   );
 }
 
-const pollIntervalMs = parseIntegerEnv('POLL_INTERVAL_MS', 5000);
+const pollIntervalMs = parseIntegerEnv('POLL_INTERVAL_MS', 60000);
 const stateFile = process.env.STATE_FILE || './last-run.json';
 const machineName = 'EnvironmentalSensor';
 

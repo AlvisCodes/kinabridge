@@ -128,7 +128,7 @@ class KinabaseClient {
 
   /**
    * Sends telemetry data via the ingest endpoint.
-   * POST /api/external/v1/collections/{collection}/ingest
+   * POST /api/v1/collections/{collection}/ingest
    */
   async #ingestRecords(collection, batch) {
     const now = new Date().toISOString();
@@ -139,7 +139,6 @@ class KinabaseClient {
 
       if (d.temperatureC != null) data.temperatureC = d.temperatureC;
       if (d.humidity != null) data.humidity = d.humidity;
-      if (d.pressure != null) data.pressure = d.pressure;
       if (d.atmospheric_pressure != null) data.atmospheric_pressure = d.atmospheric_pressure;
       if (d.battery_level != null) data.battery_level = d.battery_level;
       if (d.signal_strength != null) data.signal_strength = d.signal_strength;

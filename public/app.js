@@ -107,7 +107,7 @@ const updateVisualState = (payload) => {
       : null;
     readingTemp.textContent = formatReading(tempC);
     readingHum.textContent = formatReading(lastReadings.humidity);
-    readingPres.textContent = formatReading(lastReadings.pressure, 0);
+    readingPres.textContent = formatReading(lastReadings.atmospheric_pressure, 0);
     if (readingSignal) {
       readingSignal.textContent = lastReadings.signal_strength != null
         ? `${Number(lastReadings.signal_strength).toFixed(0)} dBm`
@@ -190,4 +190,4 @@ const toggleBridge = async () => {
 toggleButton.addEventListener('click', toggleBridge);
 
 fetchStatus();
-setInterval(fetchStatus, 300_000);
+setInterval(fetchStatus, 60_000);

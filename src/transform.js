@@ -19,6 +19,7 @@ const toNumeric = (value) => {
 const DEFAULTS = {
   battery_level: 100,        // wall-powered → always full
   signal_strength: -30,      // strong Wi-Fi signal (dBm)
+  atmospheric_pressure: 1013.25, // standard atmosphere (hPa)
   voltage: 5.0,              // USB wall supply (V)
   current_draw: 85.0,        // typical Pi draw (mA)
   power_consumption: 0.43,   // ~0.43 W
@@ -51,14 +52,16 @@ export const toKinabaseRecords = (records) => {
     const humidity = toNumeric(fields.humidity);
     if (humidity !== null) data.humidity = humidity;
 
-    const pressure = toNumeric(fields.pressure);
-    if (pressure !== null) data.pressure = pressure;
-
     data.battery_level      = toNumeric(fields.battery_level)      ?? DEFAULTS.battery_level;
     data.signal_strength    = toNumeric(fields.signal_strength)    ?? DEFAULTS.signal_strength;
 
-    // atmospheric_pressure mirrors pressure (same hPa value)
-    if (pressure !== null) data.atmospheric_pressure = pressure;
+    // atmospheric_pressure uses InfluxDB's pressure field (hPa).
+    // Guard: if value looks like kPa (<200), convert to hPa.
+    let atmPressure = toNumeric(fields.atmospheric_pressure) ?? toNumeric(fields.pressure);
+    if (atmPressure !== null && atmPressure < 200) {
+      atmPressure *= 100;  // kPa → hPa
+    }
+    data.atmospheric_pressure = atmPressure ?? DEFAULTS.atmospheric_pressure;
 
     data.voltage             = toNumeric(fields.voltage)             ?? DEFAULTS.voltage;
     data.current_draw        = toNumeric(fields.current_draw)        ?? DEFAULTS.current_draw;
