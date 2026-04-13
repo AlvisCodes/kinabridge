@@ -14,26 +14,12 @@ const parseJsonSafely = async (response) => {
 
 /**
  * Kinabase client for creating sensor reading records.
+ * Uses the telemetry ingest endpoint for updates, standard REST for creation.
  */
 class KinabaseClient {
   #baseUrl;
   #tokenProvider;
 
-  /**
-   * Creates a new KinabaseClient instance.
-   * 
-   * @param {Object} options
-   * @param {Function} options.tokenProvider - An async function that returns a JWT token string.
-   *   This should be the function returned by createTokenProvider() from kinabaseAuth.js.
-   *   Do NOT pass an object with a getToken method - pass the function directly.
-   * 
-   * @throws {TypeError} If tokenProvider is not a function.
-   * 
-   * @example
-   * import { createTokenProvider } from './kinabaseAuth.js';
-   * const tokenProvider = createTokenProvider();
-   * const client = new KinabaseClient({ tokenProvider });
-   */
   constructor({ tokenProvider }) {
     this.#baseUrl = config.kinabase.baseUrl;
     
@@ -78,8 +64,7 @@ class KinabaseClient {
 
   /**
    * Upserts records to Kinabase - maintains one record per reading_id.
-   * Creates new record if reading_id doesn't exist, updates if it does.
-   * On update, only sends mutable fields (temperatureC, humidity, pressure, battery_level, signal_strength, lastReadingAt).
+   * Creates new record if reading_id doesn't exist, ingests telemetry if it does.
    * @param {Array} records - Array of { data: {...} } objects
    * @returns {Promise<{sent: number}>}
    */
@@ -100,19 +85,40 @@ class KinabaseClient {
       }
     }
 
-    // Upsert one record per reading_id
+    // Collect records that have existing Kinabase IDs for batch ingest
+    const ingestBatch = [];
+
     for (const [readingId, record] of latestByReadingId) {
       try {
-        await this.#upsertRecord(collection, record);
-        sent++;
+        const existingRecordId = await this.#findRecordByReadingId(collection, readingId);
+
+        if (existingRecordId) {
+          ingestBatch.push({ kinabaseId: existingRecordId, record });
+        } else {
+          // Create new record with all fields + device link
+          const createData = { ...record.data, lastReadingAt: new Date().toISOString() };
+          const deviceId = getDeviceId();
+          if (deviceId) {
+            createData.device = { id: deviceId };
+          }
+          await this.#createRecord(collection, { data: createData });
+          sent++;
+        }
       } catch (error) {
         logger.error(
-          { 
-            error: error.message,
-            readingId,
-          },
+          { error: error.message, readingId },
           'Failed to upsert record in Kinabase'
         );
+      }
+    }
+
+    // Batch ingest all existing records via the telemetry endpoint
+    if (ingestBatch.length > 0) {
+      try {
+        await this.#ingestRecords(collection, ingestBatch);
+        sent += ingestBatch.length;
+      } catch (error) {
+        logger.error({ error: error.message }, 'Failed to ingest telemetry batch');
       }
     }
 
@@ -120,40 +126,100 @@ class KinabaseClient {
     return { sent };
   }
 
-  async #upsertRecord(collection, record) {
-    const readingId = record.data.reading_id;
-    
-    // First, try to find existing record for this reading_id
-    const existingRecordId = await this.#findRecordByReadingId(collection, readingId);
-    
-    if (existingRecordId) {
-      // Update existing record — only send mutable fields
-      const updateData = {
-        lastReadingAt: new Date().toISOString(),
+  /**
+   * Sends telemetry data via the ingest endpoint.
+   * POST /api/external/v1/collections/{collection}/ingest
+   */
+  async #ingestRecords(collection, batch) {
+    const now = new Date().toISOString();
+
+    const ingestRecords = batch.map(({ kinabaseId, record }) => {
+      const d = record.data;
+      const data = { lastReadingAt: now };
+
+      if (d.temperatureC != null) data.temperatureC = d.temperatureC;
+      if (d.humidity != null) data.humidity = d.humidity;
+      if (d.pressure != null) data.pressure = d.pressure;
+      if (d.atmospheric_pressure != null) data.atmospheric_pressure = d.atmospheric_pressure;
+      if (d.battery_level != null) data.battery_level = d.battery_level;
+      if (d.signal_strength != null) data.signal_strength = d.signal_strength;
+      if (d.voltage != null) data.voltage = d.voltage;
+      if (d.current_draw != null) data.current_draw = d.current_draw;
+      if (d.power_consumption != null) data.power_consumption = d.power_consumption;
+      if (d.energy_used != null) data.energy_used = d.energy_used;
+      if (d.data_transmitted != null) data.data_transmitted = d.data_transmitted;
+      if (d.light_level != null) data.light_level = d.light_level;
+
+      return {
+        id: String(kinabaseId),
+        changes: [{ timestamp: now, data }],
       };
-      if (record.data.temperatureC != null) updateData.temperatureC = record.data.temperatureC;
-      if (record.data.humidity != null) updateData.humidity = record.data.humidity;
-      if (record.data.pressure != null) updateData.pressure = record.data.pressure;
-      if (record.data.battery_level != null) updateData.battery_level = record.data.battery_level;
-      if (record.data.signal_strength != null) updateData.signal_strength = record.data.signal_strength;
-      if (record.data.atmospheric_pressure != null) updateData.atmospheric_pressure = record.data.atmospheric_pressure;
-      if (record.data.voltage != null) updateData.voltage = record.data.voltage;
-      if (record.data.current_draw != null) updateData.current_draw = record.data.current_draw;
-      if (record.data.power_consumption != null) updateData.power_consumption = record.data.power_consumption;
-      if (record.data.energy_used != null) updateData.energy_used = record.data.energy_used;
-      if (record.data.data_transmitted != null) updateData.data_transmitted = record.data.data_transmitted;
-      if (record.data.light_level != null) updateData.light_level = record.data.light_level;
-      if (record.data.wind_speed != null) updateData.wind_speed = record.data.wind_speed;
-      await this.#updateRecord(collection, existingRecordId, { data: updateData });
-    } else {
-      // Create new record with all fields + device link
-      const createData = { ...record.data, lastReadingAt: new Date().toISOString() };
-      const deviceId = getDeviceId();
-      if (deviceId) {
-        createData.device = { id: deviceId };
+    });
+
+    const payload = {
+      mode: 'FUTURE_FACING',
+      records: ingestRecords,
+    };
+
+    const url = `${this.#baseUrl}/collections/${collection}/ingest`;
+
+    logger.debug(
+      { url, recordCount: ingestRecords.length },
+      'Sending telemetry ingest...'
+    );
+
+    await pRetry(
+      async () => {
+        const token = await this.#tokenProvider();
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+            'ngrok-skip-browser-warning': 'true',
+          },
+          body: JSON.stringify(payload),
+        });
+
+        if (response.ok) {
+          logger.info(
+            { count: ingestRecords.length },
+            '✓ Ingested telemetry batch'
+          );
+          return;
+        }
+
+        if (response.status === 401) {
+          const body = await parseJsonSafely(response);
+          logger.error({ status: 401, body, url }, 'Ingest auth failed');
+          const error = new Error('Ingest authentication failed (401)');
+          error.name = 'AbortError';
+          throw error;
+        }
+
+        if (response.status >= 500) {
+          const text = await response.text();
+          throw new Error(`Kinabase ingest ${response.status}: ${text}`);
+        }
+
+        const body = await parseJsonSafely(response);
+        logger.error({ status: response.status, body, url }, 'Ingest rejected');
+        const error = new Error(`Ingest failed: ${response.status} - ${JSON.stringify(body)}`);
+        error.name = 'AbortError';
+        throw error;
+      },
+      {
+        retries: 3,
+        minTimeout: 1000,
+        factor: 2,
+        onFailedAttempt: (error) => {
+          logger.warn(
+            { attemptNumber: error.attemptNumber, retriesLeft: error.retriesLeft, message: error.message },
+            'Retrying ingest after error'
+          );
+        },
       }
-      await this.#createRecord(collection, { data: createData });
-    }
+    );
   }
 
   async #findRecordByReadingId(collection, readingId) {
@@ -184,90 +250,6 @@ class KinabaseClient {
       logger.warn({ error: error.message, readingId }, 'Error searching for record, will create new one');
       return null;
     }
-  }
-
-  async #updateRecord(collection, recordId, record) {
-    const endpoint = `/collections/${collection}/${recordId}`;
-    
-    logger.debug(
-      { 
-        recordId, 
-        fields: Object.keys(record.data)
-      }, 
-      'Updating record...'
-    );
-
-    await pRetry(
-      async () => {
-        const response = await this.#authorizedRequest('PATCH', endpoint, record);
-
-        if (response.ok) {
-          logger.info({ recordId }, '✓ Updated record');
-          return;
-        }
-
-        if (response.status === 401) {
-          const body = await parseJsonSafely(response);
-          logger.error(
-            { 
-              status: 401,
-              body,
-              endpoint
-            },
-            'Authentication failed - check JWT token validity and expiry'
-          );
-          const error = new Error('Authentication failed (401)');
-          error.name = 'AbortError';
-          throw error;
-        }
-
-        if (response.status === 404) {
-          // Record was deleted, abort retry and let caller create new one
-          const error = new Error('Record no longer exists (404)');
-          error.name = 'AbortError';
-          throw error;
-        }
-
-        if (response.status >= 500) {
-          const text = await response.text();
-          throw new Error(
-            `Kinabase returned ${response.status} for PATCH ${endpoint}: ${text}`
-          );
-        }
-
-        const body = await parseJsonSafely(response);
-        logger.error(
-          { 
-            status: response.status, 
-            body,
-            endpoint,
-            record
-          },
-          'Kinabase rejected record update'
-        );
-        
-        const error = new Error(
-          `Failed to update record: ${response.status} - ${JSON.stringify(body)}`
-        );
-        error.name = 'AbortError';
-        throw error;
-      },
-      {
-        retries: 3,
-        minTimeout: 1000,
-        factor: 2,
-        onFailedAttempt: (error) => {
-          logger.warn(
-            {
-              attemptNumber: error.attemptNumber,
-              retriesLeft: error.retriesLeft,
-              message: error.message,
-            },
-            'Retrying Kinabase update after error'
-          );
-        },
-      }
-    );
   }
 
   async #createRecord(collection, record) {

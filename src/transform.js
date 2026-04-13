@@ -25,7 +25,6 @@ const DEFAULTS = {
   energy_used: 0.01,         // negligible (kWh)
   data_transmitted: 0.12,    // small payload (MB)
   light_level: 45.0,         // indoor ambient (%)
-  wind_speed: 0.0,           // indoor, no wind (m/s)
 };
 
 export const toKinabaseRecords = (records) => {
@@ -67,7 +66,6 @@ export const toKinabaseRecords = (records) => {
     data.energy_used         = toNumeric(fields.energy_used)         ?? DEFAULTS.energy_used;
     data.data_transmitted    = toNumeric(fields.data_transmitted)    ?? DEFAULTS.data_transmitted;
     data.light_level         = toNumeric(fields.light_level)         ?? DEFAULTS.light_level;
-    data.wind_speed          = toNumeric(fields.wind_speed)          ?? DEFAULTS.wind_speed;
 
     payload.push({ data });
   }

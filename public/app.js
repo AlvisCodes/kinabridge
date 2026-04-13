@@ -30,7 +30,6 @@ const readingPower = $('reading-power');
 const readingEnergy = $('reading-energy');
 const readingData = $('reading-data');
 const readingLight = $('reading-light');
-const readingWind = $('reading-wind');
 
 const formatTimestamp = (value) => {
   if (!value) return '–';
@@ -120,7 +119,6 @@ const updateVisualState = (payload) => {
     if (readingEnergy) readingEnergy.textContent = formatReading(lastReadings.energy_used, 3);
     if (readingData) readingData.textContent = formatReading(lastReadings.data_transmitted, 2);
     if (readingLight) readingLight.textContent = formatReading(lastReadings.light_level, 1);
-    if (readingWind) readingWind.textContent = formatReading(lastReadings.wind_speed, 1);
   }
 
   // Device
