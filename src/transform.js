@@ -32,7 +32,7 @@ export const toKinabaseRecords = (records) => {
     };
 
     const temperatureC = toNumeric(fields.temperature);
-    if (temperatureC !== null) data.temperatureC = temperatureC;
+    if (temperatureC !== null) data.temperatureC = temperatureC + 273.15;
 
     const humidity = toNumeric(fields.humidity);
     if (humidity !== null) data.humidity = humidity;

@@ -116,7 +116,7 @@ if (transformed.length > 0) {
   const d = transformed[0].data;
   const checks = [
     ['reading_id', d.reading_id === 'EnvironmentalSensor'],
-    ['temperatureC', d.temperatureC === 22.4],
+    ['temperatureC', Math.abs(d.temperatureC - 295.55) < 0.01],
     ['humidity', d.humidity === 55.1],
     ['pressure', d.pressure === 1013.25],
     ['battery_level', d.battery_level === 87],
