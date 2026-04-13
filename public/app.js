@@ -24,6 +24,13 @@ const readingTemp = $('reading-temp');
 const readingHum = $('reading-hum');
 const readingPres = $('reading-pres');
 const readingSignal = $('reading-signal');
+const readingVoltage = $('reading-voltage');
+const readingCurrent = $('reading-current');
+const readingPower = $('reading-power');
+const readingEnergy = $('reading-energy');
+const readingData = $('reading-data');
+const readingLight = $('reading-light');
+const readingWind = $('reading-wind');
 
 const formatTimestamp = (value) => {
   if (!value) return '–';
@@ -95,7 +102,11 @@ const updateVisualState = (payload) => {
 
   // Live sensor readings
   if (lastReadings) {
-    readingTemp.textContent = formatReading(lastReadings.temperatureC);
+    // Convert Kelvin back to °C for display
+    const tempC = lastReadings.temperatureC != null
+      ? lastReadings.temperatureC - 273.15
+      : null;
+    readingTemp.textContent = formatReading(tempC);
     readingHum.textContent = formatReading(lastReadings.humidity);
     readingPres.textContent = formatReading(lastReadings.pressure, 0);
     if (readingSignal) {
@@ -103,6 +114,13 @@ const updateVisualState = (payload) => {
         ? `${Number(lastReadings.signal_strength).toFixed(0)} dBm`
         : '–';
     }
+    if (readingVoltage) readingVoltage.textContent = formatReading(lastReadings.voltage, 2);
+    if (readingCurrent) readingCurrent.textContent = formatReading(lastReadings.current_draw, 1);
+    if (readingPower) readingPower.textContent = formatReading(lastReadings.power_consumption, 2);
+    if (readingEnergy) readingEnergy.textContent = formatReading(lastReadings.energy_used, 3);
+    if (readingData) readingData.textContent = formatReading(lastReadings.data_transmitted, 2);
+    if (readingLight) readingLight.textContent = formatReading(lastReadings.light_level, 1);
+    if (readingWind) readingWind.textContent = formatReading(lastReadings.wind_speed, 1);
   }
 
   // Device
@@ -174,4 +192,4 @@ const toggleBridge = async () => {
 toggleButton.addEventListener('click', toggleBridge);
 
 fetchStatus();
-setInterval(fetchStatus, 5_000);
+setInterval(fetchStatus, 300_000);

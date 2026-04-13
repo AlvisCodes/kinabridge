@@ -136,6 +136,14 @@ class KinabaseClient {
       if (record.data.pressure != null) updateData.pressure = record.data.pressure;
       if (record.data.battery_level != null) updateData.battery_level = record.data.battery_level;
       if (record.data.signal_strength != null) updateData.signal_strength = record.data.signal_strength;
+      if (record.data.atmospheric_pressure != null) updateData.atmospheric_pressure = record.data.atmospheric_pressure;
+      if (record.data.voltage != null) updateData.voltage = record.data.voltage;
+      if (record.data.current_draw != null) updateData.current_draw = record.data.current_draw;
+      if (record.data.power_consumption != null) updateData.power_consumption = record.data.power_consumption;
+      if (record.data.energy_used != null) updateData.energy_used = record.data.energy_used;
+      if (record.data.data_transmitted != null) updateData.data_transmitted = record.data.data_transmitted;
+      if (record.data.light_level != null) updateData.light_level = record.data.light_level;
+      if (record.data.wind_speed != null) updateData.wind_speed = record.data.wind_speed;
       await this.#updateRecord(collection, existingRecordId, { data: updateData });
     } else {
       // Create new record with all fields + device link

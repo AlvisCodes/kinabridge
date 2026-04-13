@@ -100,6 +100,13 @@ const sampleInfluxRecords = [
       pressure: 1013.25,
       battery_level: 87,
       signal_strength: -42,
+      voltage: 3.28,
+      current_draw: 120.5,
+      power_consumption: 0.39,
+      energy_used: 1.234,
+      data_transmitted: 56.78,
+      light_level: 72.3,
+      wind_speed: 4.5,
     },
   },
 ];
@@ -121,6 +128,14 @@ if (transformed.length > 0) {
     ['pressure', d.pressure === 1013.25],
     ['battery_level', d.battery_level === 87],
     ['signal_strength', d.signal_strength === -42],
+    ['atmospheric_pressure', d.atmospheric_pressure === 1013.25],
+    ['voltage', d.voltage === 3.28],
+    ['current_draw', d.current_draw === 120.5],
+    ['power_consumption', d.power_consumption === 0.39],
+    ['energy_used', d.energy_used === 1.234],
+    ['data_transmitted', d.data_transmitted === 56.78],
+    ['light_level', d.light_level === 72.3],
+    ['wind_speed', d.wind_speed === 4.5],
   ];
   for (const [field, ok] of checks) {
     if (ok) pass(`record.${field}`, JSON.stringify(d[field]));
@@ -128,6 +143,69 @@ if (transformed.length > 0) {
   }
 } else {
   fail('flat record', 'no records in transform output');
+}
+
+// ─────────────────────────────────────────────
+// 2b. Fake defaults for missing InfluxDB fields
+// ─────────────────────────────────────────────
+console.log('\n🎭 2b. Fake Defaults (missing InfluxDB fields)\n');
+
+// Simulate what the Pi actually sends: only temperature, humidity, pressure
+const sparseInfluxRecords = [
+  {
+    machine: 'EnvironmentalSensor',
+    timestamp: new Date().toISOString(),
+    source: 'shoestring-humidity-monitoring',
+    fields: {
+      temperature: 21.0,
+      humidity: 60.0,
+      pressure: 1010.0,
+    },
+  },
+];
+
+const sparseTransformed = toKinabaseRecords(sparseInfluxRecords);
+
+if (sparseTransformed.length === 1) {
+  pass('Sparse record count', '1 record');
+} else {
+  fail('Sparse record count', `expected 1, got ${sparseTransformed.length}`);
+}
+
+if (sparseTransformed.length > 0) {
+  const s = sparseTransformed[0].data;
+
+  // Real fields should still be present
+  const realChecks = [
+    ['reading_id', s.reading_id === 'EnvironmentalSensor'],
+    ['temperatureC', Math.abs(s.temperatureC - 294.15) < 0.01],
+    ['humidity', s.humidity === 60.0],
+    ['pressure', s.pressure === 1010.0],
+    ['atmospheric_pressure', s.atmospheric_pressure === 1010.0],
+  ];
+  for (const [field, ok] of realChecks) {
+    if (ok) pass(`sparse.${field}`, JSON.stringify(s[field]));
+    else fail(`sparse.${field}`, `unexpected: ${JSON.stringify(s[field])}`);
+  }
+
+  // Fake defaults should fill in missing fields
+  const defaultChecks = [
+    ['battery_level', s.battery_level === 100, 100],
+    ['signal_strength', s.signal_strength === -30, -30],
+    ['voltage', s.voltage === 5.0, 5.0],
+    ['current_draw', s.current_draw === 85.0, 85.0],
+    ['power_consumption', s.power_consumption === 0.43, 0.43],
+    ['energy_used', s.energy_used === 0.01, 0.01],
+    ['data_transmitted', s.data_transmitted === 0.12, 0.12],
+    ['light_level', s.light_level === 45.0, 45.0],
+    ['wind_speed', s.wind_speed === 0.0, 0.0],
+  ];
+  for (const [field, ok, expected] of defaultChecks) {
+    if (ok) pass(`sparse.${field} (fake default)`, `${s[field]} (expected ${expected})`);
+    else fail(`sparse.${field} (fake default)`, `expected ${expected}, got ${JSON.stringify(s[field])}`);
+  }
+} else {
+  fail('Sparse defaults', 'no records in transform output');
 }
 
 // ─────────────────────────────────────────────
@@ -352,6 +430,14 @@ if (collectionAccessible && token) {
     pressure: 1013.25,
     battery_level: 100,
     signal_strength: -10,
+    atmospheric_pressure: 1013.25,
+    voltage: 3.3,
+    current_draw: 100.0,
+    power_consumption: 0.33,
+    energy_used: 0.5,
+    data_transmitted: 10.0,
+    light_level: 50.0,
+    wind_speed: 2.0,
     lastReadingAt: new Date().toISOString(),
   };
 
@@ -384,6 +470,14 @@ if (collectionAccessible && token) {
         pressure: 1020.5,
         battery_level: 50,
         signal_strength: -55,
+        atmospheric_pressure: 1020.5,
+        voltage: 3.1,
+        current_draw: 150.0,
+        power_consumption: 0.47,
+        energy_used: 1.0,
+        data_transmitted: 25.0,
+        light_level: 80.0,
+        wind_speed: 6.5,
         lastReadingAt: new Date().toISOString(),
       },
     };
