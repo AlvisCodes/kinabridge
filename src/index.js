@@ -7,6 +7,7 @@ import { fetchNewPoints } from './influxClient.js';
 import { toKinabaseRecords } from './transform.js';
 import { createTokenProvider } from './kinabaseAuth.js';
 import KinabaseClient from './kinabaseClient.js';
+import { ensureDevice, refreshDeviceHeartbeat } from './deviceManager.js';
 import startControlServer from './controlServer.js';
 import {
   recordKinabaseFailure,
@@ -100,6 +101,15 @@ const start = async () => {
     throw error;
   }
 
+  // Ensure the device record exists in Kinabase (create if missing)
+  try {
+    const deviceId = await ensureDevice(kinabaseClient);
+    logger.info({ deviceId }, '✓ Device record ready');
+  } catch (error) {
+    logger.error({ err: error }, 'Failed to ensure device record in Kinabase');
+    throw error;
+  }
+
   // Start polling
   const poll = async () => {
     if (isPolling) {
@@ -116,6 +126,9 @@ const start = async () => {
         logger.info('Bridge toggled off; skipping Kinabase sync this cycle');
         return;
       }
+
+      // Update device heartbeat each cycle
+      await refreshDeviceHeartbeat(kinabaseClient);
 
       const lastTimestamp = state.lastTimestamp;
 
@@ -149,7 +162,9 @@ const start = async () => {
       try {
         const result = await kinabaseClient.upsertRecords(kinabaseRecords);
         sent = result.sent;
-        recordKinabaseSuccess();
+        // Cache latest sensor values for the dashboard
+        const latestData = kinabaseRecords.length > 0 ? kinabaseRecords[kinabaseRecords.length - 1].data : null;
+        recordKinabaseSuccess(latestData);
       } catch (error) {
         recordKinabaseFailure(error);
         throw error;

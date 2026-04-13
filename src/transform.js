@@ -1,19 +1,17 @@
 import config from './config.js';
 import logger from './logger.js';
 
-// Maps the combined InfluxDB field set into the Kinabase collection fields.
-// Follows the APIRecord schema: { data: { field1: value1, field2: value2, ... } }
+// Maps InfluxDB grouped records into flat Kinabase "Sensor Readings" records.
+// One Kinabase record per machine — all sensor values as direct fields.
 
-// Map InfluxDB field names to Kinabase field names
-// (Kinabase field names must match the collection schema exactly)
-const FIELD_NAME_MAPPING = {
-  'temperature': 'Temperature',  // Capitalized to match Kinabase schema
-  'humidity': 'Humidity',
-  'pressure': 'Pressure',
+const toNumeric = (value) => {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (value != null) {
+    const parsed = Number.parseFloat(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
 };
-
-const isNumber = (value) =>
-  typeof value === 'number' && Number.isFinite(value);
 
 export const toKinabaseRecords = (records) => {
   const payload = [];
@@ -27,44 +25,34 @@ export const toKinabaseRecords = (records) => {
       continue;
     }
 
-    // Build the data object with all fields
+    const fields = record.fields || {};
+
     const data = {
-      machine: record.machine,
-      timestamp: record.timestamp,
-      source: record.source || 'shoestring-humidity-monitoring',
+      reading_id: record.machine,
     };
 
-    // Add sensor readings (temperature, humidity, pressure)
-    // Map InfluxDB field names to Kinabase field names
-    for (const [fieldName, value] of Object.entries(record.fields || {})) {
-      if (isNumber(value)) {
-        // Map to Kinabase field name (e.g., temperature -> Tempreture)
-        const kinabaseFieldName = FIELD_NAME_MAPPING[fieldName] || fieldName;
-        data[kinabaseFieldName] = value;
-      } else if (value != null) {
-        const numeric = Number.parseFloat(value);
-        if (Number.isFinite(numeric)) {
-          const kinabaseFieldName = FIELD_NAME_MAPPING[fieldName] || fieldName;
-          data[kinabaseFieldName] = numeric;
-        } else {
-          logger.debug(
-            { fieldName, value },
-            'Dropping non-numeric field value from Kinabase payload'
-          );
-        }
-      }
-    }
+    const temperatureC = toNumeric(fields.temperature);
+    if (temperatureC !== null) data.temperatureC = temperatureC;
 
-    // Wrap in APIRecord format: { data: { ... } }
-    payload.push({
-      data
-    });
+    const humidity = toNumeric(fields.humidity);
+    if (humidity !== null) data.humidity = humidity;
+
+    const pressure = toNumeric(fields.pressure);
+    if (pressure !== null) data.pressure = pressure;
+
+    const batteryLevel = toNumeric(fields.battery_level);
+    if (batteryLevel !== null) data.battery_level = batteryLevel;
+
+    const signalStrength = toNumeric(fields.signal_strength);
+    if (signalStrength !== null) data.signal_strength = signalStrength;
+
+    payload.push({ data });
   }
 
   logger.debug(
-    { 
+    {
       count: payload.length,
-      sampleFields: payload[0] ? Object.keys(payload[0].data) : []
+      sampleReadingIds: payload.slice(0, 3).map((r) => r.data.reading_id),
     },
     'Transformed records for Kinabase'
   );

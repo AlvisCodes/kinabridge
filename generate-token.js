@@ -1,8 +1,8 @@
 import fetch from 'node-fetch';
 
-const API_KEY = '7dd3bcf4-f317-4652-9f98-07ca161b543c';
-const API_SECRET = 'yUpAH3dXYX7pxryfSksyNg5RQq9LyZrjua0HictGQCCQU1kRuf1/sMWIfZKsjzs0zqCRtz49sJmkhhgNmZfuWQ==';
-const KINABASE_BASE_URL = 'https://api.kinabase.io/v1';
+const API_KEY = '76bd4b6a-3b0e-4b58-b539-45e3e5f6f860';
+const API_SECRET = 'tueirVPEyAWQejUYdNOlFaiFbHgwb47Y1mZ1I/apTEsgTy4II1qdr8LBjdmhVNdnGONnK9QlBjErDfdVwAVyZQ==';
+const KINABASE_BASE_URL = 'http://10.127.26.199:5272/api/v1';
 
 async function generateToken() {
   console.log('Generating Kinabase JWT token...\n');

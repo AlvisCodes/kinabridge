@@ -32,8 +32,9 @@ INFLUX_BUCKET=shoestring_data_bucket
 INFLUX_READ_TOKEN=your_influx_token
 
 # Kinabase Configuration (Use API Key/Secret for auto-refresh)
-KINABASE_BASE_URL=https://beta.kinabase.com/api/v1
-KINABASE_COLLECTION=sensor-readings
+KINABASE_BASE_URL=http://10.127.26.199:5272/api/v1
+KINABASE_COLLECTION=584f2727-8b0b-4abd-8bad-e08d767e9527
+KINABASE_DEVICES_COLLECTION=1abece96-c3b3-4423-ad58-346637a0ca02
 KINABASE_API_KEY=your_api_key
 KINABASE_API_SECRET=your_api_secret
 

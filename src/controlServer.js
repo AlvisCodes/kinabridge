@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import config from './config.js';
 import logger from './logger.js';
+import { getDeviceId } from './deviceManager.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -11,10 +12,21 @@ const publicDir = path.resolve(__dirname, '..', 'public');
 const createStatusPayload = async ({ stateProvider, statusProvider }) => {
   const state = await stateProvider();
   const status = statusProvider();
+  const intervalMin = Math.round(config.pollIntervalMs / 60000);
   return {
     bridgeEnabled: state.bridgeEnabled,
     lastTimestamp: state.lastTimestamp,
     kinabase: status,
+    device: {
+      id: getDeviceId(),
+      name: config.machineName,
+      collection: config.kinabase.devicesCollection,
+    },
+    connection: {
+      baseUrl: config.kinabase.baseUrl,
+      collection: config.kinabase.collection,
+      pollInterval: `${intervalMin}m`,
+    },
   };
 };
 

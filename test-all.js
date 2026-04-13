@@ -1,0 +1,563 @@
+#!/usr/bin/env node
+
+/**
+ * Kinabridge Full Integration Test
+ * Verifies: config, API reachability, auth token, device auto-creation,
+ * collection access, transform logic, create/read/update cycle, and optionally InfluxDB & Pi.
+ *
+ * Usage:
+ *   node test-all.js              # Run all tests
+ *   node test-all.js --skip-pi    # Skip Pi connectivity check
+ *   node test-all.js --skip-influx  # Skip InfluxDB check
+ */
+
+import fetch from 'node-fetch';
+import { InfluxDB } from '@influxdata/influxdb-client';
+import config from './src/config.js';
+import { createTokenProvider } from './src/kinabaseAuth.js';
+import { toKinabaseRecords } from './src/transform.js';
+
+const PI_HOST = process.env.PI_HOST || 'raspberrypi.local';
+const PI_PORT = process.env.PI_PORT || 22;
+const skipPi = process.argv.includes('--skip-pi');
+const skipInflux = process.argv.includes('--skip-influx');
+
+let passed = 0;
+let failed = 0;
+let skipped = 0;
+
+const pass = (name, detail) => {
+  passed++;
+  console.log(`  ✅ ${name}${detail ? ` — ${detail}` : ''}`);
+};
+const fail = (name, detail) => {
+  failed++;
+  console.log(`  ❌ ${name}${detail ? ` — ${detail}` : ''}`);
+};
+const skip = (name, reason) => {
+  skipped++;
+  console.log(`  ⏭️  ${name} — skipped (${reason})`);
+};
+
+// ─────────────────────────────────────────────
+// 1. Configuration checks
+// ─────────────────────────────────────────────
+console.log('\n🔧 1. Configuration\n');
+
+const expectedCollection = '584f2727-8b0b-4abd-8bad-e08d767e9527';
+const expectedDevicesCollection = '1abece96-c3b3-4423-ad58-346637a0ca02';
+const expectedApiKey = '76bd4b6a-3b0e-4b58-b539-45e3e5f6f860';
+
+if (config.kinabase.baseUrl) {
+  pass('Base URL', config.kinabase.baseUrl);
+} else {
+  fail('Base URL', 'not set');
+}
+
+if (config.kinabase.collection === expectedCollection) {
+  pass('Collection ID', config.kinabase.collection);
+} else {
+  fail('Collection ID', `expected ${expectedCollection}, got ${config.kinabase.collection}`);
+}
+
+if (config.kinabase.devicesCollection === expectedDevicesCollection) {
+  pass('Devices Collection ID', config.kinabase.devicesCollection);
+} else {
+  fail('Devices Collection ID', `expected ${expectedDevicesCollection}, got ${config.kinabase.devicesCollection}`);
+}
+
+if (config.kinabase.apiKey === expectedApiKey) {
+  pass('API Key (AppID)', config.kinabase.apiKey);
+} else {
+  fail('API Key (AppID)', `expected ${expectedApiKey}, got ${config.kinabase.apiKey}`);
+}
+
+if (config.kinabase.apiSecret && config.kinabase.apiSecret.length > 20) {
+  pass('API Secret', `set (${config.kinabase.apiSecret.length} chars)`);
+} else {
+  fail('API Secret', 'missing or too short');
+}
+
+if (config.machineName) {
+  pass('Machine Name', config.machineName);
+} else {
+  fail('Machine Name', 'not set');
+}
+
+// ─────────────────────────────────────────────
+// 2. Transform logic (offline)
+// ─────────────────────────────────────────────
+console.log('\n🔄 2. Transform Logic\n');
+
+const sampleInfluxRecords = [
+  {
+    machine: 'EnvironmentalSensor',
+    timestamp: new Date().toISOString(),
+    source: 'shoestring-humidity-monitoring',
+    fields: {
+      temperature: 22.4,
+      humidity: 55.1,
+      pressure: 1013.25,
+      battery_level: 87,
+      signal_strength: -42,
+    },
+  },
+];
+
+const transformed = toKinabaseRecords(sampleInfluxRecords);
+
+if (transformed.length === 1) {
+  pass('Record count', `${transformed.length} record (one flat record per machine)`);
+} else {
+  fail('Record count', `expected 1, got ${transformed.length}`);
+}
+
+if (transformed.length > 0) {
+  const d = transformed[0].data;
+  const checks = [
+    ['reading_id', d.reading_id === 'EnvironmentalSensor'],
+    ['temperatureC', d.temperatureC === 22.4],
+    ['humidity', d.humidity === 55.1],
+    ['pressure', d.pressure === 1013.25],
+    ['battery_level', d.battery_level === 87],
+    ['signal_strength', d.signal_strength === -42],
+  ];
+  for (const [field, ok] of checks) {
+    if (ok) pass(`record.${field}`, JSON.stringify(d[field]));
+    else fail(`record.${field}`, `unexpected: ${JSON.stringify(d[field])}`);
+  }
+} else {
+  fail('flat record', 'no records in transform output');
+}
+
+// ─────────────────────────────────────────────
+// 3. API Reachability
+// ─────────────────────────────────────────────
+console.log('\n🌐 3. API Reachability\n');
+
+let apiReachable = false;
+try {
+  const resp = await fetch(config.kinabase.baseUrl, { method: 'GET', signal: AbortSignal.timeout(10000) });
+  apiReachable = true;
+  pass('Kinabase API reachable', `${config.kinabase.baseUrl} → HTTP ${resp.status}`);
+} catch (err) {
+  fail('Kinabase API reachable', `${config.kinabase.baseUrl} → ${err.message}`);
+}
+
+// ─────────────────────────────────────────────
+// 4. Token Generation
+// ─────────────────────────────────────────────
+console.log('\n🔑 4. Token Generation\n');
+
+let token = null;
+try {
+  const tokenProvider = createTokenProvider();
+  if (typeof tokenProvider !== 'function') throw new Error('createTokenProvider did not return a function');
+  pass('createTokenProvider returns function');
+
+  token = await tokenProvider();
+  if (typeof token === 'string' && token.length > 0) {
+    pass('Token obtained', `${token.substring(0, 30)}...`);
+
+    // Decode JWT payload
+    const parts = token.split('.');
+    if (parts.length === 3) {
+      const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+      if (payload.exp) {
+        const expiry = new Date(payload.exp * 1000);
+        const remaining = expiry - Date.now();
+        if (remaining > 0) {
+          const mins = Math.floor(remaining / 60000);
+          pass('Token not expired', `expires in ${mins} min`);
+        } else {
+          fail('Token expired', expiry.toISOString());
+        }
+      }
+      if (payload.appid) pass('Token appid', payload.appid);
+    }
+  } else {
+    fail('Token obtained', 'empty or non-string');
+  }
+} catch (err) {
+  fail('Token generation', err.message);
+}
+
+// Helper for authenticated requests
+const authHeaders = token
+  ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+  : null;
+
+// ─────────────────────────────────────────────
+// 5. Collection Access (Sensor Readings)
+// ─────────────────────────────────────────────
+console.log('\n📂 5. Collection Access\n');
+
+let collectionAccessible = false;
+if (token && apiReachable) {
+  const collectionUrl = `${config.kinabase.baseUrl}/collections/${config.kinabase.collection}?limit=1`;
+  try {
+    const resp = await fetch(collectionUrl, { headers: authHeaders, signal: AbortSignal.timeout(10000) });
+
+    if (resp.ok) {
+      collectionAccessible = true;
+      const body = await resp.json();
+      const records = body.records || body.data || body;
+      const count = Array.isArray(records) ? records.length : '?';
+      pass('GET Sensor Readings collection', `HTTP ${resp.status}, ${count} record(s)`);
+    } else {
+      fail('GET Sensor Readings collection', `HTTP ${resp.status}`);
+    }
+  } catch (err) {
+    fail('GET Sensor Readings collection', err.message);
+  }
+} else {
+  skip('GET Sensor Readings collection', 'API unreachable or no token');
+}
+
+// ─────────────────────────────────────────────
+// 5b. Devices Collection Access
+// ─────────────────────────────────────────────
+
+let devicesAccessible = false;
+if (token && apiReachable) {
+  const devicesUrl = `${config.kinabase.baseUrl}/collections/${config.kinabase.devicesCollection}?limit=1`;
+  try {
+    const resp = await fetch(devicesUrl, { headers: authHeaders, signal: AbortSignal.timeout(10000) });
+
+    if (resp.ok) {
+      devicesAccessible = true;
+      pass('GET Devices collection', `HTTP ${resp.status}`);
+    } else {
+      fail('GET Devices collection', `HTTP ${resp.status}`);
+    }
+  } catch (err) {
+    fail('GET Devices collection', err.message);
+  }
+} else {
+  skip('GET Devices collection', 'API unreachable or no token');
+}
+
+// ─────────────────────────────────────────────
+// 6. Device Auto-Creation
+// ─────────────────────────────────────────────
+console.log('\n🖥️  6. Device Auto-Creation\n');
+
+let testDeviceId = null;
+if (devicesAccessible && token) {
+  const devicesBase = `${config.kinabase.baseUrl}/collections/${config.kinabase.devicesCollection}`;
+  const testDeviceName = `_TEST_DEVICE_${Date.now()}`;
+
+  // 6a. Create a test device
+  try {
+    const resp = await fetch(devicesBase, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({
+        data: {
+          device_name: testDeviceName,
+          status: 'online',
+          last_seen: new Date().toISOString(),
+        },
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (resp.ok) {
+      const body = await resp.json();
+      testDeviceId = body.id || body.data?.id;
+      pass('POST create device', `id=${testDeviceId}, name=${testDeviceName}`);
+    } else {
+      const text = await resp.text();
+      fail('POST create device', `HTTP ${resp.status}: ${text.substring(0, 200)}`);
+    }
+  } catch (err) {
+    fail('POST create device', err.message);
+  }
+
+  // 6b. Find device by filter
+  if (testDeviceId) {
+    try {
+      const filterUrl = `${devicesBase}?filter[device_name]=${encodeURIComponent(testDeviceName)}&limit=1`;
+      const resp = await fetch(filterUrl, { headers: authHeaders, signal: AbortSignal.timeout(10000) });
+
+      if (resp.ok) {
+        const body = await resp.json();
+        const records = body.records || body.data || body;
+        const found = Array.isArray(records) && records.some(r => String(r.id) === String(testDeviceId));
+        if (found) {
+          pass('Filter device by name', `found ${testDeviceName}`);
+        } else {
+          fail('Filter device by name', `expected id=${testDeviceId} in results: ${JSON.stringify(records?.map(r => r.id)).substring(0, 100)}`);
+        }
+      } else {
+        fail('Filter device by name', `HTTP ${resp.status}`);
+      }
+    } catch (err) {
+      fail('Filter device by name', err.message);
+    }
+
+    // 6c. Update heartbeat
+    try {
+      const resp = await fetch(`${devicesBase}/${testDeviceId}`, {
+        method: 'PATCH',
+        headers: authHeaders,
+        body: JSON.stringify({ data: { status: 'online', last_seen: new Date().toISOString() } }),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (resp.ok) {
+        pass('PATCH device heartbeat', 'status→online, last_seen updated');
+      } else {
+        fail('PATCH device heartbeat', `HTTP ${resp.status}`);
+      }
+    } catch (err) {
+      fail('PATCH device heartbeat', err.message);
+    }
+
+    // 6d. Cleanup test device
+    try {
+      const resp = await fetch(`${devicesBase}/${testDeviceId}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (resp.ok || resp.status === 204) {
+        pass('DELETE test device', `removed ${testDeviceId}`);
+      } else {
+        fail('DELETE test device', `HTTP ${resp.status}`);
+      }
+    } catch (err) {
+      fail('DELETE test device', err.message);
+    }
+  }
+} else {
+  skip('Device auto-creation', 'Devices collection not accessible');
+}
+
+// ─────────────────────────────────────────────
+// 7. Sensor Reading Create + Update Cycle
+// ─────────────────────────────────────────────
+console.log('\n🔁 7. Sensor Reading Create / Update / Cleanup\n');
+
+let testRecordId = null;
+if (collectionAccessible && token) {
+  const collectionBase = `${config.kinabase.baseUrl}/collections/${config.kinabase.collection}`;
+
+  // 7a. Create test sensor reading (with device link if available)
+  const createData = {
+    reading_id: `_TEST_${Date.now()}`,
+    temperatureC: 22.4,
+    humidity: 55.1,
+    pressure: 1013.25,
+    battery_level: 100,
+    signal_strength: -10,
+    lastReadingAt: new Date().toISOString(),
+  };
+
+  try {
+    const resp = await fetch(collectionBase, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({ data: createData }),
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (resp.ok) {
+      const body = await resp.json();
+      testRecordId = body.id || body.data?.id;
+      pass('POST create reading', `id=${testRecordId}`);
+    } else {
+      const text = await resp.text();
+      fail('POST create reading', `HTTP ${resp.status}: ${text.substring(0, 200)}`);
+    }
+  } catch (err) {
+    fail('POST create reading', err.message);
+  }
+
+  // 7b. Update (mutable fields only + last_reading_at)
+  if (testRecordId) {
+    const updatePayload = {
+      data: {
+        temperatureC: 33.3,
+        humidity: 66.6,
+        pressure: 1020.5,
+        battery_level: 50,
+        signal_strength: -55,
+        lastReadingAt: new Date().toISOString(),
+      },
+    };
+    try {
+      const resp = await fetch(`${collectionBase}/${testRecordId}`, {
+        method: 'PATCH',
+        headers: authHeaders,
+        body: JSON.stringify(updatePayload),
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (resp.ok) {
+        pass('PATCH update reading', 'temperatureC→33.3, humidity→66.6, pressure→1020.5');
+      } else {
+        const text = await resp.text();
+        fail('PATCH update reading', `HTTP ${resp.status}: ${text.substring(0, 200)}`);
+      }
+    } catch (err) {
+      fail('PATCH update reading', err.message);
+    }
+
+    // 7c. Verify update
+    try {
+      const resp = await fetch(`${collectionBase}/${testRecordId}`, {
+        headers: authHeaders,
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (resp.ok) {
+        const body = await resp.json();
+        const data = body.data || body;
+        if (Number(data.temperatureC) === 33.3) {
+          pass('GET verify update', `temperatureC=${data.temperatureC}`);
+        } else {
+          fail('GET verify update', `temperatureC=${data.temperatureC}, expected 33.3`);
+        }
+      } else {
+        fail('GET verify update', `HTTP ${resp.status}`);
+      }
+    } catch (err) {
+      fail('GET verify update', err.message);
+    }
+
+    // 7d. Cleanup
+    try {
+      const resp = await fetch(`${collectionBase}/${testRecordId}`, {
+        method: 'DELETE',
+        headers: authHeaders,
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (resp.ok || resp.status === 204) {
+        pass('DELETE cleanup reading', `removed ${testRecordId}`);
+      } else {
+        fail('DELETE cleanup reading', `HTTP ${resp.status}`);
+      }
+    } catch (err) {
+      fail('DELETE cleanup reading', err.message);
+    }
+  }
+} else {
+  skip('Sensor reading cycle', 'collection not accessible');
+}
+
+// ─────────────────────────────────────────────
+// 8. Filter by reading_id
+// ─────────────────────────────────────────────
+console.log('\n🔍 8. Filter by reading_id\n');
+
+if (collectionAccessible && token) {
+  const filterUrl = `${config.kinabase.baseUrl}/collections/${config.kinabase.collection}?filter[reading_id]=_NONEXISTENT_&limit=1`;
+  try {
+    const resp = await fetch(filterUrl, { headers: authHeaders, signal: AbortSignal.timeout(10000) });
+
+    if (resp.ok) {
+      const body = await resp.json();
+      const records = body.records || body.data || body;
+      const count = Array.isArray(records) ? records.length : 0;
+      pass('Filter endpoint works', `returned ${count} results for non-existent id`);
+    } else {
+      fail('Filter endpoint', `HTTP ${resp.status}`);
+    }
+  } catch (err) {
+    fail('Filter endpoint', err.message);
+  }
+} else {
+  skip('Filter by reading_id', 'collection not accessible');
+}
+
+// ─────────────────────────────────────────────
+// 9. InfluxDB Connectivity
+// ─────────────────────────────────────────────
+console.log('\n📊 9. InfluxDB\n');
+
+if (skipInflux) {
+  skip('InfluxDB', '--skip-influx flag');
+} else {
+  try {
+    const influxDB = new InfluxDB({ url: config.influx.url, token: config.influx.token });
+    const queryApi = influxDB.getQueryApi(config.influx.org);
+
+    const query = `
+      from(bucket: "${config.influx.bucket}")
+        |> range(start: -1h)
+        |> filter(fn: (r) => r["_measurement"] == "humidity_sensors")
+        |> limit(n: 1)
+    `;
+
+    const rows = await queryApi.collectRows(query);
+    if (rows.length > 0) {
+      pass('InfluxDB query', `${rows.length} row(s) in last hour`);
+      const fields = [...new Set(rows.map((r) => r._field))];
+      pass('InfluxDB fields', fields.join(', '));
+    } else {
+      console.log('  ⚠️  InfluxDB: No data in last hour (sensor may be idle)');
+      const widerQuery = `
+        from(bucket: "${config.influx.bucket}")
+          |> range(start: -24h)
+          |> filter(fn: (r) => r["_measurement"] == "humidity_sensors")
+          |> limit(n: 1)
+      `;
+      const widerRows = await queryApi.collectRows(widerQuery);
+      if (widerRows.length > 0) {
+        pass('InfluxDB (24h window)', `found ${widerRows.length} row(s)`);
+      } else {
+        fail('InfluxDB', 'no data in last 24 hours');
+      }
+    }
+  } catch (err) {
+    fail('InfluxDB connection', err.message);
+  }
+}
+
+// ─────────────────────────────────────────────
+// 10. Pi Connectivity (optional)
+// ─────────────────────────────────────────────
+console.log('\n🥧 10. Raspberry Pi\n');
+
+if (skipPi) {
+  skip('Pi connectivity', '--skip-pi flag');
+} else {
+  const net = await import('net');
+  try {
+    await new Promise((resolve, reject) => {
+      const socket = new net.default.Socket();
+      socket.setTimeout(5000);
+      socket.on('connect', () => {
+        socket.destroy();
+        resolve();
+      });
+      socket.on('timeout', () => {
+        socket.destroy();
+        reject(new Error('timeout'));
+      });
+      socket.on('error', reject);
+      socket.connect(Number(PI_PORT), PI_HOST);
+    });
+    pass(`Pi reachable at ${PI_HOST}:${PI_PORT}`, 'SSH port open');
+  } catch (err) {
+    fail(`Pi reachable at ${PI_HOST}:${PI_PORT}`, err.message);
+    console.log('    Set PI_HOST env var if your Pi has a different hostname');
+  }
+}
+
+// ─────────────────────────────────────────────
+// Summary
+// ─────────────────────────────────────────────
+console.log('\n' + '═'.repeat(50));
+console.log(`  ✅ Passed: ${passed}   ❌ Failed: ${failed}   ⏭️  Skipped: ${skipped}`);
+console.log('═'.repeat(50));
+
+if (failed > 0) {
+  console.log('\n⚠️  Some tests failed — review the output above.\n');
+  process.exit(1);
+} else {
+  console.log('\n🎉 All tests passed!\n');
+}

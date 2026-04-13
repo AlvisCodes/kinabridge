@@ -8,6 +8,8 @@
     "start": "node src/index.js",
     "dev": "node src/index.js --once",
     "test:influx": "node test-influx.js",
+    "test:all": "node test-all.js",
+    "test:all:skip-pi": "node test-all.js --skip-pi",
     "lint": "echo \"No lint configuration\""
   },
   "engines": {

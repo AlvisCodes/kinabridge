@@ -1,8 +1,8 @@
 import fetch from 'node-fetch';
 
-const KINABASE_BASE_URL = 'https://beta.kinabase.com/api/v1';
-const APP_ID = 'ff03d99d-df24-4f64-a922-f1486b0ecdfb';
-const APP_SECRET = 'RzNygfnluStVLJ0QbrAT6btPRDbm0Xs8YCFTLd3r8Kw2Ndx/hoKUQqrDtIg/hpRrSq7jLUcWdVV/cNdfLClYOA==';
+const KINABASE_BASE_URL = 'http://10.127.26.199:5272/api/v1';
+const APP_ID = '76bd4b6a-3b0e-4b58-b539-45e3e5f6f860';
+const APP_SECRET = 'tueirVPEyAWQejUYdNOlFaiFbHgwb47Y1mZ1I/apTEsgTy4II1qdr8LBjdmhVNdnGONnK9QlBjErDfdVwAVyZQ==';
 
 async function generateToken() {
   try {
@@ -33,7 +33,7 @@ async function generateToken() {
     
   } catch (error) {
     console.error('❌ Error:', error.message);
-    console.error('\nMake sure your local Kinabase server is running at http://localhost:3000');
+    console.error('\nMake sure your Kinabase server is running at http://10.127.26.199:5272');
   }
 }
 

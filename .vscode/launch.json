@@ -1,0 +1,45 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Start Bridge",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/index.js",
+      "console": "integratedTerminal",
+      "serverReadyAction": {
+        "pattern": "localhost:([0-9]+)",
+        "uriFormat": "http://localhost:%s",
+        "action": "openExternally"
+      }
+    },
+    {
+      "name": "Start Bridge (once)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/src/index.js",
+      "args": ["--once"],
+      "console": "integratedTerminal",
+      "serverReadyAction": {
+        "pattern": "localhost:([0-9]+)",
+        "uriFormat": "http://localhost:%s",
+        "action": "openExternally"
+      }
+    },
+    {
+      "name": "Run Tests (skip Pi + InfluxDB)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/test-all.js",
+      "args": ["--skip-pi", "--skip-influx"],
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Run Tests (all)",
+      "type": "node",
+      "request": "launch",
+      "program": "${workspaceFolder}/test-all.js",
+      "console": "integratedTerminal"
+    }
+  ]
+}

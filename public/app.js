@@ -1,66 +1,141 @@
-const bridgeIndicator = document.getElementById('bridge-indicator');
-const bridgeStatus = document.getElementById('bridge-status');
-const statusDetail = document.getElementById('status-detail');
-const toggleButton = document.getElementById('toggle-button');
-const lastSuccess = document.getElementById('last-success');
-const lastTimestamp = document.getElementById('last-timestamp');
+/* ── Kinabridge Dashboard ─────────────────────── */
+
+const $ = (id) => document.getElementById(id);
+
+const bridgeIndicator = $('bridge-indicator');
+const bridgeStatus = $('bridge-status');
+const statusDetail = $('status-detail');
+const toggleButton = $('toggle-button');
+const lastSuccess = $('last-success');
+const lastTimestamp = $('last-timestamp');
+const deviceName = $('device-name');
+const deviceIdDisplay = $('device-id-display');
+const deviceBadge = $('device-badge');
+const headerDot = $('header-dot');
+const headerStatusText = $('header-status-text');
+const headerBadge = $('header-badge');
+const connApi = $('conn-api');
+const connCollection = $('conn-collection');
+const connPoll = $('conn-poll');
+const connPollDetail = $('conn-poll-detail');
+
+// Sensor reading elements
+const readingTemp = $('reading-temp');
+const readingHum = $('reading-hum');
+const readingPres = $('reading-pres');
+const readingSignal = $('reading-signal');
 
 const formatTimestamp = (value) => {
-  if (!value) {
-    return '–';
-  }
+  if (!value) return '–';
   try {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-      return '–';
-    }
-    return date.toLocaleString();
-  } catch (error) {
-    return '–';
-  }
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '–';
+    const now = new Date();
+    const diff = now - d;
+    if (diff < 60_000) return 'Just now';
+    if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+    if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+    return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch { return '–'; }
+};
+
+const formatReading = (value, decimals = 1) => {
+  if (value == null || value === '') return '–';
+  const num = Number(value);
+  return Number.isFinite(num) ? num.toFixed(decimals) : '–';
 };
 
 const updateVisualState = (payload) => {
-  const { bridgeEnabled, kinabase, lastTimestamp: latestPoint } = payload;
+  const { bridgeEnabled, kinabase, lastTimestamp: latestPoint, device, connection } = payload;
   const status = kinabase || {};
-  const { connected, lastSuccess: successAt, lastError } = status;
+  const { connected, lastSuccess: successAt, lastError, lastReadings } = status;
 
+  // Reset classes
   bridgeIndicator.classList.remove('status-on', 'status-off', 'status-idle');
+  headerDot.classList.remove('dot--on', 'dot--off', 'dot--idle');
+  headerBadge.classList.remove('badge--on', 'badge--off', 'badge--idle');
 
   if (!bridgeEnabled) {
-    bridgeStatus.textContent = 'Bridge Paused';
-    statusDetail.textContent = 'Data syncing is currently turned off.';
+    bridgeStatus.textContent = 'Paused';
+    statusDetail.textContent = 'Data collection is paused. Press Resume to start again.';
     bridgeIndicator.classList.add('status-off');
-    toggleButton.textContent = 'Turn On Bridge';
+    headerDot.classList.add('dot--off');
+    headerBadge.classList.add('badge--off');
+    headerStatusText.textContent = 'Paused';
+    toggleButton.textContent = 'Resume';
+    toggleButton.classList.add('btn--resume');
   } else if (connected) {
-    bridgeStatus.textContent = 'Kinabase Connected';
-    statusDetail.textContent = 'Streaming humidity data to Kinabase.';
+    bridgeStatus.textContent = 'Running';
+    statusDetail.textContent = 'Collecting and sending sensor data.';
     bridgeIndicator.classList.add('status-on');
-    toggleButton.textContent = 'Turn Off Bridge';
+    headerDot.classList.add('dot--on');
+    headerBadge.classList.add('badge--on');
+    headerStatusText.textContent = 'Live';
+    toggleButton.textContent = 'Pause';
+    toggleButton.classList.remove('btn--resume');
   } else {
-    bridgeStatus.textContent = 'Connection Pending';
-    const detail = lastError?.message
-      ? `Waiting for successful upload. Last error: ${lastError.message}`
-      : 'Waiting for the next successful upload.';
-    statusDetail.textContent = detail;
+    bridgeStatus.textContent = 'Waiting for data';
+    statusDetail.textContent = lastError?.message
+      ? `Something went wrong: ${lastError.message}`
+      : 'Waiting for the first sensor reading to come through.';
     bridgeIndicator.classList.add('status-idle');
-    toggleButton.textContent = 'Turn Off Bridge';
+    headerDot.classList.add('dot--idle');
+    headerBadge.classList.add('badge--idle');
+    headerStatusText.textContent = 'Waiting';
+    toggleButton.textContent = 'Pause';
+    toggleButton.classList.remove('btn--resume');
   }
 
   toggleButton.dataset.enabled = bridgeEnabled ? 'true' : 'false';
   toggleButton.disabled = false;
 
-  lastSuccess.textContent = `Last sync: ${formatTimestamp(successAt)}`;
-  lastTimestamp.textContent = `Last processed data: ${formatTimestamp(
-    latestPoint
-  )}`;
+  // Metrics
+  lastSuccess.textContent = formatTimestamp(successAt);
+  lastTimestamp.textContent = formatTimestamp(latestPoint);
+
+  // Live sensor readings
+  if (lastReadings) {
+    readingTemp.textContent = formatReading(lastReadings.temperatureC);
+    readingHum.textContent = formatReading(lastReadings.humidity);
+    readingPres.textContent = formatReading(lastReadings.pressure, 0);
+    if (readingSignal) {
+      readingSignal.textContent = lastReadings.signal_strength != null
+        ? `${Number(lastReadings.signal_strength).toFixed(0)} dBm`
+        : '–';
+    }
+  }
+
+  // Device
+  if (device?.id) {
+    deviceName.textContent = device.name || 'Unknown';
+    deviceIdDisplay.textContent = `Device #${device.id}`;
+    deviceBadge.style.display = '';
+  } else {
+    deviceName.textContent = device?.name || 'Not set up yet';
+    deviceIdDisplay.textContent = 'Will be registered automatically';
+    deviceBadge.style.display = 'none';
+  }
+
+  // Connection info
+  if (connection) {
+    connApi.textContent = connection.baseUrl || '–';
+    connCollection.textContent = connection.collection ? connection.collection.substring(0, 8) + '…' : '–';
+    connCollection.title = connection.collection || '';
+    connPoll.textContent = connection.pollInterval || '–';
+    if (connPollDetail) connPollDetail.textContent = connection.pollInterval || '–';
+  }
 };
 
 const handleError = (error) => {
-  bridgeIndicator.classList.remove('status-on');
+  bridgeIndicator.classList.remove('status-on', 'status-idle');
   bridgeIndicator.classList.add('status-off');
-  bridgeStatus.textContent = 'Status Unavailable';
-  statusDetail.textContent = error?.message || 'Unable to reach bridge service.';
+  headerDot.classList.remove('dot--on', 'dot--idle');
+  headerDot.classList.add('dot--off');
+  headerBadge.classList.remove('badge--on', 'badge--idle');
+  headerBadge.classList.add('badge--off');
+  bridgeStatus.textContent = 'Cannot connect';
+  statusDetail.textContent = error?.message || 'Unable to reach the bridge service.';
+  headerStatusText.textContent = 'Offline';
   toggleButton.textContent = 'Retry';
   toggleButton.disabled = false;
 };
@@ -69,9 +144,7 @@ const fetchStatus = async () => {
   toggleButton.disabled = true;
   try {
     const response = await fetch('/api/status', { cache: 'no-store' });
-    if (!response.ok) {
-      throw new Error(`Bridge returned ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     updateVisualState(data);
   } catch (error) {
@@ -87,16 +160,10 @@ const toggleBridge = async () => {
   try {
     const response = await fetch('/api/status', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ bridgeEnabled: !enabled }),
     });
-
-    if (!response.ok) {
-      throw new Error(`Failed to update bridge (${response.status})`);
-    }
-
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     updateVisualState(data);
   } catch (error) {
@@ -107,4 +174,4 @@ const toggleBridge = async () => {
 toggleButton.addEventListener('click', toggleBridge);
 
 fetchStatus();
-setInterval(fetchStatus, 10_000);
+setInterval(fetchStatus, 5_000);

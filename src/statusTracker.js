@@ -4,10 +4,12 @@ const DEFAULT_STALENESS_WINDOW = Math.max(config.pollIntervalMs * 3, 60_000);
 
 let lastSuccess = null;
 let lastError = null;
+let lastReadings = null;
 
-export const recordKinabaseSuccess = () => {
+export const recordKinabaseSuccess = (readings = null) => {
   lastSuccess = new Date().toISOString();
   lastError = null;
+  if (readings) lastReadings = readings;
 };
 
 export const recordKinabaseFailure = (error) => {
@@ -27,5 +29,6 @@ export const getKinabaseStatus = () => {
     connected,
     lastSuccess,
     lastError,
+    lastReadings,
   };
 };

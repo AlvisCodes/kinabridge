@@ -3,7 +3,7 @@ import config from './config.js';
 import logger from './logger.js';
 
 const MEASUREMENT = 'humidity_sensors';
-const FIELD_WHITELIST = new Set(['temperature', 'humidity', 'pressure']);
+const FIELD_WHITELIST = new Set(['temperature', 'humidity', 'pressure', 'battery_level', 'signal_strength']);
 const SOURCE_NAME = 'shoestring-humidity-monitoring';
 
 const influxDB = new InfluxDB({

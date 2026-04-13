@@ -2,6 +2,7 @@ import fetch from 'node-fetch';
 import pRetry from 'p-retry';
 import config from './config.js';
 import logger from './logger.js';
+import { getDeviceId } from './deviceManager.js';
 
 const parseJsonSafely = async (response) => {
   try {
@@ -68,8 +69,16 @@ class KinabaseClient {
   }
 
   /**
-   * Upserts records to Kinabase - maintains one record per machine.
-   * Creates new record if machine doesn't exist, updates if it does.
+   * Public accessor for authorizedRequest — used by deviceManager.
+   */
+  async authorizedRequest(method, path, body = null) {
+    return this.#authorizedRequest(method, path, body);
+  }
+
+  /**
+   * Upserts records to Kinabase - maintains one record per reading_id.
+   * Creates new record if reading_id doesn't exist, updates if it does.
+   * On update, only sends mutable fields (temperatureC, humidity, pressure, battery_level, signal_strength, lastReadingAt).
    * @param {Array} records - Array of { data: {...} } objects
    * @returns {Promise<{sent: number}>}
    */
@@ -81,23 +90,17 @@ class KinabaseClient {
     let sent = 0;
     const collection = config.kinabase.collection;
 
-    // Group records by machine - only keep the latest reading per machine
-    const latestByMachine = new Map();
+    // Group records by reading_id - only keep the latest per reading_id
+    const latestByReadingId = new Map();
     for (const record of records) {
-      const machine = record.data.machine;
-      if (!latestByMachine.has(machine)) {
-        latestByMachine.set(machine, record);
-      } else {
-        // Keep the record with the latest timestamp
-        const existing = latestByMachine.get(machine);
-        if (new Date(record.data.timestamp) > new Date(existing.data.timestamp)) {
-          latestByMachine.set(machine, record);
-        }
+      const readingId = record.data.reading_id;
+      if (!latestByReadingId.has(readingId)) {
+        latestByReadingId.set(readingId, record);
       }
     }
 
-    // Upsert one record per machine
-    for (const [machine, record] of latestByMachine) {
+    // Upsert one record per reading_id
+    for (const [readingId, record] of latestByReadingId) {
       try {
         await this.#upsertRecord(collection, record);
         sent++;
@@ -105,43 +108,55 @@ class KinabaseClient {
         logger.error(
           { 
             error: error.message,
-            machine,
+            readingId,
           },
           'Failed to upsert record in Kinabase'
         );
-        // Continue with next machine instead of failing entire batch
       }
     }
 
-    logger.info({ sent, machines: sent }, `✓ Synced ${sent} machine(s) to Kinabase`);
+    logger.info({ sent, readings: sent }, `✓ Synced ${sent} reading(s) to Kinabase`);
     return { sent };
   }
 
   async #upsertRecord(collection, record) {
-    const machine = record.data.machine;
+    const readingId = record.data.reading_id;
     
-    // First, try to find existing record for this machine
-    const existingRecordId = await this.#findRecordByMachine(collection, machine);
+    // First, try to find existing record for this reading_id
+    const existingRecordId = await this.#findRecordByReadingId(collection, readingId);
     
     if (existingRecordId) {
-      // Update existing record
-      await this.#updateRecord(collection, existingRecordId, record);
+      // Update existing record — only send mutable fields
+      const updateData = {
+        lastReadingAt: new Date().toISOString(),
+      };
+      if (record.data.temperatureC != null) updateData.temperatureC = record.data.temperatureC;
+      if (record.data.humidity != null) updateData.humidity = record.data.humidity;
+      if (record.data.pressure != null) updateData.pressure = record.data.pressure;
+      if (record.data.battery_level != null) updateData.battery_level = record.data.battery_level;
+      if (record.data.signal_strength != null) updateData.signal_strength = record.data.signal_strength;
+      await this.#updateRecord(collection, existingRecordId, { data: updateData });
     } else {
-      // Create new record
-      await this.#createRecord(collection, record);
+      // Create new record with all fields + device link
+      const createData = { ...record.data, lastReadingAt: new Date().toISOString() };
+      const deviceId = getDeviceId();
+      if (deviceId) {
+        createData.device = { id: deviceId };
+      }
+      await this.#createRecord(collection, { data: createData });
     }
   }
 
-  async #findRecordByMachine(collection, machine) {
-    const endpoint = `/collections/${collection}?filter[machine]=${encodeURIComponent(machine)}&limit=1`;
+  async #findRecordByReadingId(collection, readingId) {
+    const endpoint = `/collections/${collection}?filter[reading_id]=${encodeURIComponent(readingId)}&limit=1`;
     
-    logger.debug({ endpoint, machine }, 'Searching for existing record');
+    logger.debug({ endpoint, readingId }, 'Searching for existing record');
 
     try {
       const response = await this.#authorizedRequest('GET', endpoint);
       
       if (!response.ok) {
-        logger.warn({ status: response.status, machine }, 'Failed to search for existing record');
+        logger.warn({ status: response.status, readingId }, 'Failed to search for existing record');
         return null;
       }
 
@@ -150,26 +165,24 @@ class KinabaseClient {
       
       if (Array.isArray(records) && records.length > 0) {
         const recordId = records[0].id;
-        logger.debug({ recordId, machine }, 'Found existing record');
+        logger.debug({ recordId, readingId }, 'Found existing record');
         return recordId;
       }
       
-      logger.debug({ machine }, 'No existing record found');
+      logger.debug({ readingId }, 'No existing record found');
       return null;
     } catch (error) {
-      logger.warn({ error: error.message, machine }, 'Error searching for record, will create new one');
+      logger.warn({ error: error.message, readingId }, 'Error searching for record, will create new one');
       return null;
     }
   }
 
   async #updateRecord(collection, recordId, record) {
     const endpoint = `/collections/${collection}/${recordId}`;
-    const machine = record.data.machine;
     
     logger.debug(
       { 
         recordId, 
-        machine, 
         fields: Object.keys(record.data)
       }, 
       'Updating record...'
@@ -180,7 +193,7 @@ class KinabaseClient {
         const response = await this.#authorizedRequest('PATCH', endpoint, record);
 
         if (response.ok) {
-          logger.info({ recordId, machine }, '✓ Updated record');
+          logger.info({ recordId }, '✓ Updated record');
           return;
         }
 
@@ -250,11 +263,11 @@ class KinabaseClient {
 
   async #createRecord(collection, record) {
     const endpoint = `/collections/${collection}`;
-    const machine = record.data?.machine;
+    const readingId = record.data?.reading_id;
     
     logger.debug(
       { 
-        machine, 
+        readingId, 
         fields: Object.keys(record.data)
       }, 
       'Creating new record...'
@@ -266,7 +279,7 @@ class KinabaseClient {
 
         if (response.ok) {
           const body = await parseJsonSafely(response);
-          logger.info({ recordId: body?.id, machine }, '✓ Created new record');
+          logger.info({ recordId: body?.id, readingId }, '✓ Created new record');
           return;
         }
 
