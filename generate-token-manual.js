@@ -1,6 +1,6 @@
 import fetch from 'node-fetch';
 
-const KINABASE_BASE_URL = 'http://10.127.26.199:5272/api/v1';
+const KINABASE_BASE_URL = 'https://smooth-liger-quietly.ngrok-free.app/api/v1';
 const APP_ID = '76bd4b6a-3b0e-4b58-b539-45e3e5f6f860';
 const APP_SECRET = 'tueirVPEyAWQejUYdNOlFaiFbHgwb47Y1mZ1I/apTEsgTy4II1qdr8LBjdmhVNdnGONnK9QlBjErDfdVwAVyZQ==';
 
@@ -10,6 +10,7 @@ async function generateToken() {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
       },
       body: JSON.stringify({
         appId: APP_ID,
@@ -33,7 +34,7 @@ async function generateToken() {
     
   } catch (error) {
     console.error('❌ Error:', error.message);
-    console.error('\nMake sure your Kinabase server is running at http://10.127.26.199:5272');
+    console.error('\nMake sure your Kinabase server is running via ngrok at https://smooth-liger-quietly.ngrok-free.app');
   }
 }
 

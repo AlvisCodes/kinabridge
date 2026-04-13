@@ -137,7 +137,7 @@ console.log('\n🌐 3. API Reachability\n');
 
 let apiReachable = false;
 try {
-  const resp = await fetch(config.kinabase.baseUrl, { method: 'GET', signal: AbortSignal.timeout(10000) });
+  const resp = await fetch(config.kinabase.baseUrl, { method: 'GET', headers: { 'ngrok-skip-browser-warning': 'true' }, signal: AbortSignal.timeout(10000) });
   apiReachable = true;
   pass('Kinabase API reachable', `${config.kinabase.baseUrl} → HTTP ${resp.status}`);
 } catch (err) {
@@ -184,7 +184,7 @@ try {
 
 // Helper for authenticated requests
 const authHeaders = token
-  ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+  ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' }
   : null;
 
 // ─────────────────────────────────────────────

@@ -2,7 +2,7 @@ import fetch from 'node-fetch';
 
 const API_KEY = '76bd4b6a-3b0e-4b58-b539-45e3e5f6f860';
 const API_SECRET = 'tueirVPEyAWQejUYdNOlFaiFbHgwb47Y1mZ1I/apTEsgTy4II1qdr8LBjdmhVNdnGONnK9QlBjErDfdVwAVyZQ==';
-const KINABASE_BASE_URL = 'http://10.127.26.199:5272/api/v1';
+const KINABASE_BASE_URL = 'https://smooth-liger-quietly.ngrok-free.app/api/v1';
 
 async function generateToken() {
   console.log('Generating Kinabase JWT token...\n');
@@ -19,6 +19,7 @@ async function generateToken() {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Basic ${basicAuth}`,
+        'ngrok-skip-browser-warning': 'true',
       },
       body: JSON.stringify({
         apiKey: API_KEY,
@@ -36,6 +37,7 @@ async function generateToken() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'ngrok-skip-browser-warning': 'true',
         },
         body: JSON.stringify({
           apiKey: API_KEY,

@@ -54,6 +54,7 @@ class KinabaseClient {
     const headers = {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
+      'ngrok-skip-browser-warning': 'true',
     };
 
     const options = {

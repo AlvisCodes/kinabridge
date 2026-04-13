@@ -31,7 +31,7 @@ try {
   bad('Get JWT token', e.message);
   process.exit(1);
 }
-const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'ngrok-skip-browser-warning': 'true' };
 
 // 2. Transform
 console.log('\n2. Transform (InfluxDB → Kinabase format)');

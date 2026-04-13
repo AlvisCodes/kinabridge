@@ -36,7 +36,7 @@ const influx = {
 };
 
 const kinabase = {
-  baseUrl: process.env.KINABASE_BASE_URL || 'http://10.127.26.199:5272/api/v1',
+  baseUrl: process.env.KINABASE_BASE_URL || 'https://smooth-liger-quietly.ngrok-free.app/api/v1',
   collection: requiredEnv('KINABASE_COLLECTION'),
   devicesCollection: process.env.KINABASE_DEVICES_COLLECTION || '1abece96-c3b3-4423-ad58-346637a0ca02',
   apiKey: process.env.KINABASE_API_KEY,
