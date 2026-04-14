@@ -1,5 +1,5 @@
 import { promises as fs } from 'fs';
-import { dirname } from 'path';
+import { dirname, join } from 'path';
 import config from './config.js';
 import logger from './logger.js';
 
@@ -23,10 +23,16 @@ const normalizeState = (state) => ({
   ...(state || {}),
 });
 
+/**
+ * Atomic write — writes to a temp file then renames, so a crash
+ * mid-write never corrupts the real state file.
+ */
 const writeState = async (state) => {
   const payload = JSON.stringify(state, null, 2);
   await ensureDirectory(config.stateFile);
-  await fs.writeFile(config.stateFile, payload, 'utf-8');
+  const tmpFile = `${config.stateFile}.tmp`;
+  await fs.writeFile(tmpFile, payload, 'utf-8');
+  await fs.rename(tmpFile, config.stateFile);
   cachedState = state;
   return state;
 };
@@ -45,6 +51,16 @@ export const loadState = async () => {
     if (error.code === 'ENOENT') {
       logger.info(`State file ${config.stateFile} not found; starting fresh.`);
       cachedState = { ...defaultState };
+      return cachedState;
+    }
+    if (error instanceof SyntaxError) {
+      logger.warn(
+        { file: config.stateFile, error: error.message },
+        'State file corrupted — resetting to defaults'
+      );
+      cachedState = { ...defaultState };
+      // Overwrite the corrupt file with clean defaults
+      await writeState(cachedState);
       return cachedState;
     }
     throw error;

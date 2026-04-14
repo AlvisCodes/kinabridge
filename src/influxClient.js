@@ -5,6 +5,7 @@ import logger from './logger.js';
 const MEASUREMENT = 'humidity_sensors';
 const FIELD_WHITELIST = new Set(['temperature', 'humidity', 'pressure', 'battery_level', 'signal_strength', 'voltage', 'current_draw', 'power_consumption', 'energy_used', 'data_transmitted', 'light_level', 'atmospheric_pressure']);
 const SOURCE_NAME = 'shoestring-humidity-monitoring';
+const QUERY_TIMEOUT_MS = 30_000;
 
 const influxDB = new InfluxDB({
   url: config.influx.url,
@@ -44,7 +45,12 @@ from(bucket: "${config.influx.bucket}")
     'Querying InfluxDB for new humidity sensor points'
   );
 
-  const rows = await queryApi.collectRows(fluxQuery);
+  const rows = await Promise.race([
+    queryApi.collectRows(fluxQuery),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('InfluxDB query timed out')), QUERY_TIMEOUT_MS)
+    ),
+  ]);
 
   const grouped = new Map();
   let latestProcessedDate = sinceDate ?? null;

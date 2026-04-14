@@ -12,6 +12,7 @@ import startControlServer from './controlServer.js';
 import {
   recordKinabaseFailure,
   recordKinabaseSuccess,
+  recordPollCycle,
   getKinabaseStatus,
 } from './statusTracker.js';
 
@@ -110,6 +111,33 @@ const start = async () => {
     throw error;
   }
 
+  // ── Startup self-test ──────────────────────────
+  // Verify InfluxDB and Kinabase are reachable before committing to the poll loop.
+  logger.info('🔍 Running startup self-test...');
+
+  // Test InfluxDB
+  try {
+    const { records } = await fetchNewPoints({ since: new Date(Date.now() - 5 * 60_000).toISOString() });
+    logger.info({ records: records.length }, `✓ InfluxDB OK — ${records.length} record(s) in last 5 min`);
+  } catch (error) {
+    logger.warn({ err: error }, '⚠ InfluxDB self-test failed — will retry on first poll cycle');
+  }
+
+  // Test Kinabase API (collection access)
+  try {
+    const resp = await kinabaseClient.authorizedRequest(
+      'GET',
+      `/collections/${config.kinabase.collection}?limit=1`
+    );
+    if (resp.ok) {
+      logger.info('✓ Kinabase API OK — collection accessible');
+    } else {
+      logger.warn({ status: resp.status }, '⚠ Kinabase self-test: unexpected status');
+    }
+  } catch (error) {
+    logger.warn({ err: error }, '⚠ Kinabase self-test failed — will retry on first poll');
+  }
+
   // Start polling
   const poll = async () => {
     if (isPolling) {
@@ -118,6 +146,8 @@ const start = async () => {
     }
 
     isPolling = true;
+    const pollStart = Date.now();
+    let sent = 0;
 
     try {
       const state = await loadState();
@@ -181,7 +211,6 @@ const start = async () => {
         `Sending ${kinabaseRecords.length} record(s) to Kinabase with ${outFields.length} fields: ${outFields.join(', ')}`
       );
 
-      let sent = 0;
       try {
         const result = await kinabaseClient.upsertRecords(kinabaseRecords);
         sent = result.sent;
@@ -229,6 +258,9 @@ const start = async () => {
       recordKinabaseFailure(error);
       logger.error({ err: error }, 'Kinabase bridge poller encountered an error');
     } finally {
+      const durationMs = Date.now() - pollStart;
+      recordPollCycle({ sent, durationMs });
+      logger.debug({ durationMs, sent }, `Poll cycle completed in ${durationMs}ms`);
       isPolling = false;
     }
   };
@@ -242,16 +274,20 @@ const start = async () => {
   logger.info('🚀 Starting Kinabase bridge - initial sync...');
   await poll();
 
-  // Set up recurring polling
+  // Set up recurring polling with chained setTimeout (prevents overlap/drift)
   const intervalMinutes = Math.round(config.pollIntervalMs / 60000);
   logger.info(
     { intervalMs: config.pollIntervalMs, intervalMinutes },
     `📊 Polling every ${intervalMinutes} minute(s) for sensor updates`
   );
 
-  setInterval(async () => {
-    await poll();
-  }, config.pollIntervalMs);
+  const scheduleNext = () => {
+    setTimeout(async () => {
+      await poll();
+      if (!interrupted) scheduleNext();
+    }, config.pollIntervalMs);
+  };
+  scheduleNext();
 };
 
 start().catch((error) => {

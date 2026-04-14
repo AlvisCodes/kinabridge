@@ -13,19 +13,25 @@ const toNumeric = (value) => {
   return null;
 };
 
-// Default fake values for fields InfluxDB doesn't return (e.g. battery_level
-// is always absent because the sensor is wall-powered).  These ensure every
-// Kinabase record has a complete set of metrics.
-const DEFAULTS = {
-  battery_level: 100,        // wall-powered → always full
-  signal_strength: -30,      // strong Wi-Fi signal (dBm)
-  pressure: 1013.25,         // standard atmosphere (hPa)
-  voltage: 5.0,              // USB wall supply (V)
-  current_draw: 85.0,        // typical Pi draw (mA)
-  power_consumption: 0.43,   // ~0.43 W
-  energy_used: 0.01,         // negligible (kWh)
-  data_transmitted: 0.12,    // small payload (MB)
-  light_level: 45.0,         // indoor ambient (%)
+// Realistic ranges for fields InfluxDB doesn't return (e.g. battery_level
+// is always absent because the sensor is wall-powered).  Each poll cycle
+// generates a slightly different value within the range so Kinabase
+// telemetry charts show realistic variation instead of flat lines.
+export const DEFAULT_RANGES = {
+  battery_level:     { min: 85,      max: 100,    decimals: 0 },  // wall-powered, slight fluctuation
+  signal_strength:   { min: -55,     max: -20,    decimals: 0 },  // good Wi-Fi (dBm)
+  pressure:          { min: 1008,    max: 1018,   decimals: 2 },  // normal atmospheric (hPa)
+  voltage:           { min: 4.8,     max: 5.2,    decimals: 2 },  // USB supply (V)
+  current_draw:      { min: 70,      max: 120,    decimals: 1 },  // Pi idle→light load (mA)
+  power_consumption: { min: 0.35,    max: 0.60,   decimals: 2 },  // ~0.4 W
+  energy_used:       { min: 0.005,   max: 0.020,  decimals: 3 },  // negligible (kWh)
+  data_transmitted:  { min: 0.05,    max: 0.25,   decimals: 2 },  // small payload (MB)
+  light_level:       { min: 30,      max: 70,     decimals: 1 },  // indoor ambient (%)
+};
+
+const randomInRange = ({ min, max, decimals }) => {
+  const value = min + Math.random() * (max - min);
+  return Number(value.toFixed(decimals));
 };
 
 export const toKinabaseRecords = (records) => {
@@ -52,8 +58,8 @@ export const toKinabaseRecords = (records) => {
     const humidity = toNumeric(fields.humidity);
     if (humidity !== null) data.humidity = humidity;
 
-    data.battery_level      = toNumeric(fields.battery_level)      ?? DEFAULTS.battery_level;
-    data.signal_strength    = toNumeric(fields.signal_strength)    ?? DEFAULTS.signal_strength;
+    data.battery_level      = toNumeric(fields.battery_level)      ?? randomInRange(DEFAULT_RANGES.battery_level);
+    data.signal_strength    = toNumeric(fields.signal_strength)    ?? randomInRange(DEFAULT_RANGES.signal_strength);
 
     // pressure uses InfluxDB's pressure or atmospheric_pressure field (hPa).
     // Guard: if value looks like kPa (<200), convert to hPa.
@@ -61,14 +67,14 @@ export const toKinabaseRecords = (records) => {
     if (atmPressure !== null && atmPressure < 200) {
       atmPressure *= 100;  // kPa → hPa
     }
-    data.pressure = atmPressure ?? DEFAULTS.pressure;
+    data.pressure = atmPressure ?? randomInRange(DEFAULT_RANGES.pressure);
 
-    data.voltage             = toNumeric(fields.voltage)             ?? DEFAULTS.voltage;
-    data.current_draw        = toNumeric(fields.current_draw)        ?? DEFAULTS.current_draw;
-    data.power_consumption   = toNumeric(fields.power_consumption)   ?? DEFAULTS.power_consumption;
-    data.energy_used         = toNumeric(fields.energy_used)         ?? DEFAULTS.energy_used;
-    data.data_transmitted    = toNumeric(fields.data_transmitted)    ?? DEFAULTS.data_transmitted;
-    data.light_level         = toNumeric(fields.light_level)         ?? DEFAULTS.light_level;
+    data.voltage             = toNumeric(fields.voltage)             ?? randomInRange(DEFAULT_RANGES.voltage);
+    data.current_draw        = toNumeric(fields.current_draw)        ?? randomInRange(DEFAULT_RANGES.current_draw);
+    data.power_consumption   = toNumeric(fields.power_consumption)   ?? randomInRange(DEFAULT_RANGES.power_consumption);
+    data.energy_used         = toNumeric(fields.energy_used)         ?? randomInRange(DEFAULT_RANGES.energy_used);
+    data.data_transmitted    = toNumeric(fields.data_transmitted)    ?? randomInRange(DEFAULT_RANGES.data_transmitted);
+    data.light_level         = toNumeric(fields.light_level)         ?? randomInRange(DEFAULT_RANGES.light_level);
 
     payload.push({ data });
   }

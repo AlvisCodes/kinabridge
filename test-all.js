@@ -15,7 +15,7 @@ import fetch from 'node-fetch';
 import { InfluxDB } from '@influxdata/influxdb-client';
 import config from './src/config.js';
 import { createTokenProvider } from './src/kinabaseAuth.js';
-import { toKinabaseRecords } from './src/transform.js';
+import { toKinabaseRecords, DEFAULT_RANGES } from './src/transform.js';
 
 const PI_HOST = process.env.PI_HOST || 'raspberrypi.local';
 const PI_PORT = process.env.PI_PORT || 22;
@@ -184,20 +184,23 @@ if (sparseTransformed.length > 0) {
     else fail(`sparse.${field}`, `unexpected: ${JSON.stringify(s[field])}`);
   }
 
-  // Fake defaults should fill in missing fields
-  const defaultChecks = [
-    ['battery_level', s.battery_level === 100, 100],
-    ['signal_strength', s.signal_strength === -30, -30],
-    ['voltage', s.voltage === 5.0, 5.0],
-    ['current_draw', s.current_draw === 85.0, 85.0],
-    ['power_consumption', s.power_consumption === 0.43, 0.43],
-    ['energy_used', s.energy_used === 0.01, 0.01],
-    ['data_transmitted', s.data_transmitted === 0.12, 0.12],
-    ['light_level', s.light_level === 45.0, 45.0],
+  // Fake defaults should fill in missing fields — now randomised within ranges
+  const rangeChecks = [
+    ['battery_level', s.battery_level, DEFAULT_RANGES.battery_level],
+    ['signal_strength', s.signal_strength, DEFAULT_RANGES.signal_strength],
+    ['voltage', s.voltage, DEFAULT_RANGES.voltage],
+    ['current_draw', s.current_draw, DEFAULT_RANGES.current_draw],
+    ['power_consumption', s.power_consumption, DEFAULT_RANGES.power_consumption],
+    ['energy_used', s.energy_used, DEFAULT_RANGES.energy_used],
+    ['data_transmitted', s.data_transmitted, DEFAULT_RANGES.data_transmitted],
+    ['light_level', s.light_level, DEFAULT_RANGES.light_level],
   ];
-  for (const [field, ok, expected] of defaultChecks) {
-    if (ok) pass(`sparse.${field} (fake default)`, `${s[field]} (expected ${expected})`);
-    else fail(`sparse.${field} (fake default)`, `expected ${expected}, got ${JSON.stringify(s[field])}`);
+  for (const [field, val, range] of rangeChecks) {
+    if (val >= range.min && val <= range.max) {
+      pass(`sparse.${field} (random default)`, `${val} (in range ${range.min}–${range.max})`);
+    } else {
+      fail(`sparse.${field} (random default)`, `${val} outside range ${range.min}–${range.max}`);
+    }
   }
 } else {
   fail('Sparse defaults', 'no records in transform output');
@@ -238,10 +241,11 @@ const noPressureRecords = toKinabaseRecords([{
 
 if (noPressureRecords.length === 1) {
   const n = noPressureRecords[0].data;
-  if (n.pressure === 1013.25) {
-    pass('pressure default', `${n.pressure} hPa (standard atmosphere)`);
+  const pr = DEFAULT_RANGES.pressure;
+  if (n.pressure >= pr.min && n.pressure <= pr.max) {
+    pass('pressure default', `${n.pressure} hPa (random in ${pr.min}–${pr.max})`);
   } else {
-    fail('pressure default', `expected 1013.25, got ${n.pressure}`);
+    fail('pressure default', `${n.pressure} outside range ${pr.min}–${pr.max}`);
   }
 } else {
   fail('pressure default', 'no records');
@@ -715,8 +719,8 @@ if (collectionAccessible && token) {
           const verifyFields = {
             temperatureC:          [v => Math.abs(v - 296.65) < 0.01, '~296.65 K'],
             humidity:              [v => v === 48.0, '48.0'],
-            battery_level:         [v => v === 100, '100 (fake)'],
-            signal_strength:       [v => v === -30, '-30 (fake)'],
+            battery_level:         [v => v >= DEFAULT_RANGES.battery_level.min && v <= DEFAULT_RANGES.battery_level.max, `${DEFAULT_RANGES.battery_level.min}–${DEFAULT_RANGES.battery_level.max} (random)`],
+            signal_strength:       [v => v >= DEFAULT_RANGES.signal_strength.min && v <= DEFAULT_RANGES.signal_strength.max, `${DEFAULT_RANGES.signal_strength.min}–${DEFAULT_RANGES.signal_strength.max} (random)`],
           };
 
           // Metric-type fields may not appear in GET responses (stored in telemetry store)
@@ -949,7 +953,10 @@ console.log('\n🧪 2e. Transform Edge Cases\n');
   }]);
   if (emptyFields.length === 1) {
     const d = emptyFields[0].data;
-    if (d.battery_level === 100 && d.voltage === 5.0 && d.pressure === 1013.25) {
+    const bOk = d.battery_level >= DEFAULT_RANGES.battery_level.min && d.battery_level <= DEFAULT_RANGES.battery_level.max;
+    const vOk = d.voltage >= DEFAULT_RANGES.voltage.min && d.voltage <= DEFAULT_RANGES.voltage.max;
+    const pOk = d.pressure >= DEFAULT_RANGES.pressure.min && d.pressure <= DEFAULT_RANGES.pressure.max;
+    if (bOk && vOk && pOk) {
       pass('Empty fields → all defaults', `battery=${d.battery_level}, voltage=${d.voltage}, pressure=${d.pressure}`);
     } else {
       fail('Empty fields → defaults', `battery=${d.battery_level}, voltage=${d.voltage}, pressure=${d.pressure}`);
@@ -1018,7 +1025,8 @@ console.log('\n🧪 2e. Transform Edge Cases\n');
   }]);
   if (garbageValues.length === 1) {
     const d = garbageValues[0].data;
-    if (d.temperatureC == null && d.humidity == null && d.battery_level === 100) {
+    const bOk = d.battery_level >= DEFAULT_RANGES.battery_level.min && d.battery_level <= DEFAULT_RANGES.battery_level.max;
+    if (d.temperatureC == null && d.humidity == null && bOk) {
       pass('Garbage values → defaults/null', `temp=${d.temperatureC}, hum=${d.humidity}, battery=${d.battery_level}`);
     } else {
       fail('Garbage values', `temp=${d.temperatureC}, hum=${d.humidity}, battery=${d.battery_level}`);
@@ -1038,6 +1046,136 @@ console.log('\n🧪 2e. Transform Edge Cases\n');
     pass('Kelvin conversion', `0°C → ${kelvinCheck[0].data.temperatureC} K`);
   } else {
     fail('Kelvin conversion', `expected 273.15, got ${kelvinCheck[0]?.data?.temperatureC}`);
+  }
+}
+
+// ─────────────────────────────────────────────
+// 2f. Randomised defaults — variation & range tests
+// ─────────────────────────────────────────────
+console.log('\n🎲 2f. Randomised Default Variation\n');
+
+{
+  const sparseInput = () => [{
+    machine: 'RandomTest',
+    timestamp: new Date().toISOString(),
+    source: 'test',
+    fields: { temperature: 20.0, humidity: 50.0 },
+  }];
+
+  // Run transform multiple times and check that at least one field varies
+  const ITERATIONS = 20;
+  const allResults = [];
+  for (let i = 0; i < ITERATIONS; i++) {
+    allResults.push(toKinabaseRecords(sparseInput())[0].data);
+  }
+
+  // 2f-a. Values differ across calls (not hardcoded)
+  const fieldsToCheck = Object.keys(DEFAULT_RANGES);
+  let fieldsWithVariation = 0;
+  for (const field of fieldsToCheck) {
+    const uniqueValues = new Set(allResults.map(d => d[field]));
+    if (uniqueValues.size > 1) {
+      fieldsWithVariation++;
+    }
+  }
+  if (fieldsWithVariation >= fieldsToCheck.length - 1) {
+    pass('Defaults vary across calls', `${fieldsWithVariation}/${fieldsToCheck.length} fields produced distinct values over ${ITERATIONS} runs`);
+  } else {
+    fail('Defaults vary across calls', `only ${fieldsWithVariation}/${fieldsToCheck.length} fields varied — values may still be hardcoded`);
+  }
+
+  // 2f-b. Every value is within its declared range
+  let allInRange = true;
+  let outOfRangeDetail = '';
+  for (const result of allResults) {
+    for (const [field, range] of Object.entries(DEFAULT_RANGES)) {
+      const val = result[field];
+      if (val < range.min || val > range.max) {
+        allInRange = false;
+        outOfRangeDetail = `${field}=${val} outside ${range.min}–${range.max}`;
+        break;
+      }
+    }
+    if (!allInRange) break;
+  }
+  if (allInRange) {
+    pass('All random defaults in range', `${ITERATIONS} records × ${fieldsToCheck.length} fields — all within bounds`);
+  } else {
+    fail('Random default out of range', outOfRangeDetail);
+  }
+
+  // 2f-c. Decimal precision matches declared decimals
+  let precisionOk = true;
+  let precisionDetail = '';
+  for (const result of allResults) {
+    for (const [field, range] of Object.entries(DEFAULT_RANGES)) {
+      const val = result[field];
+      const parts = String(val).split('.');
+      const actualDecimals = parts.length > 1 ? parts[1].length : 0;
+      if (actualDecimals > range.decimals) {
+        precisionOk = false;
+        precisionDetail = `${field}=${val} has ${actualDecimals} decimals, expected ≤${range.decimals}`;
+        break;
+      }
+    }
+    if (!precisionOk) break;
+  }
+  if (precisionOk) {
+    pass('Decimal precision correct', `all values respect declared decimals`);
+  } else {
+    fail('Decimal precision', precisionDetail);
+  }
+
+  // 2f-d. Real InfluxDB values override random defaults (not replaced)
+  const withRealData = toKinabaseRecords([{
+    machine: 'OverrideTest',
+    timestamp: new Date().toISOString(),
+    source: 'test',
+    fields: { temperature: 22.0, humidity: 50.0, battery_level: 42, signal_strength: -70, voltage: 3.3 },
+  }]);
+  if (withRealData.length === 1) {
+    const d = withRealData[0].data;
+    if (d.battery_level === 42 && d.signal_strength === -70 && d.voltage === 3.3) {
+      pass('Real values override defaults', `battery=42, signal=-70, voltage=3.3 (not randomised)`);
+    } else {
+      fail('Real values override defaults', `battery=${d.battery_level}, signal=${d.signal_strength}, voltage=${d.voltage}`);
+    }
+  } else {
+    fail('Override test', 'no transform output');
+  }
+
+  // 2f-e. Each call produces independent random values (no shared state between records)
+  const multiDevice = toKinabaseRecords([
+    { machine: 'DeviceA', timestamp: new Date().toISOString(), source: 'test', fields: { temperature: 20.0 } },
+    { machine: 'DeviceB', timestamp: new Date().toISOString(), source: 'test', fields: { temperature: 21.0 } },
+    { machine: 'DeviceC', timestamp: new Date().toISOString(), source: 'test', fields: { temperature: 22.0 } },
+  ]);
+  if (multiDevice.length === 3) {
+    let anyDiffer = false;
+    for (const field of fieldsToCheck) {
+      const vals = new Set(multiDevice.map(r => r.data[field]));
+      if (vals.size > 1) { anyDiffer = true; break; }
+    }
+    if (anyDiffer) {
+      pass('Multi-device independent randoms', 'different devices got different default values');
+    } else {
+      fail('Multi-device independent randoms', 'all 3 devices got identical defaults — suspicious');
+    }
+  } else {
+    fail('Multi-device transform', `expected 3, got ${multiDevice.length}`);
+  }
+
+  // 2f-f. DEFAULT_RANGES exported and well-formed
+  const rangeFields = Object.keys(DEFAULT_RANGES);
+  const wellFormed = rangeFields.every(f => {
+    const r = DEFAULT_RANGES[f];
+    return typeof r.min === 'number' && typeof r.max === 'number'
+      && typeof r.decimals === 'number' && r.min <= r.max && r.decimals >= 0;
+  });
+  if (wellFormed && rangeFields.length === 9) {
+    pass('DEFAULT_RANGES well-formed', `${rangeFields.length} fields, all have min ≤ max and decimals ≥ 0`);
+  } else {
+    fail('DEFAULT_RANGES', `malformed or wrong count (${rangeFields.length})`);
   }
 }
 

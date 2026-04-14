@@ -54,6 +54,26 @@ export const startControlServer = ({
     }
   });
 
+  // Health check endpoint — standard for container orchestration / monitoring
+  app.get('/api/health', async (req, res) => {
+    try {
+      const status = statusProvider();
+      const state = await stateProvider();
+      const healthy = state.bridgeEnabled && (status.connected || !status.lastError);
+      res.status(healthy ? 200 : 503).json({
+        status: healthy ? 'healthy' : 'degraded',
+        bridgeEnabled: state.bridgeEnabled,
+        connected: status.connected,
+        lastSuccess: status.lastSuccess,
+        lastError: status.lastError?.message || null,
+        stats: status.stats || {},
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      res.status(500).json({ status: 'error', error: error.message });
+    }
+  });
+
   app.post('/api/status', async (req, res) => {
     const { bridgeEnabled } = req.body || {};
     if (typeof bridgeEnabled !== 'boolean') {
@@ -87,14 +107,14 @@ export const startControlServer = ({
     next();
   });
 
-  app.listen(port, () => {
+  const server = app.listen(port, () => {
     logger.info(
       { port, url: `http://localhost:${port}` },
       'Kinabase bridge control UI available'
     );
   });
 
-  return { port };
+  return { port, server };
 };
 
 export default startControlServer;

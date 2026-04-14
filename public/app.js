@@ -19,6 +19,12 @@ const connCollection = $('conn-collection');
 const connPoll = $('conn-poll');
 const connPollDetail = $('conn-poll-detail');
 
+// Stats elements
+const statUptime = $('stat-uptime');
+const statRecords = $('stat-records');
+const statSuccessRate = $('stat-success-rate');
+const statPollDuration = $('stat-poll-duration');
+
 // Sensor reading elements
 const readingTemp = $('reading-temp');
 const readingHum = $('reading-hum');
@@ -68,6 +74,35 @@ const formatReading = (value, decimals = 1) => {
   if (value == null || value === '') return '–';
   const num = Number(value);
   return Number.isFinite(num) ? num.toFixed(decimals) : '–';
+};
+
+const formatUptime = (ms) => {
+  if (!ms || ms < 0) return '–';
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  const d = Math.floor(h / 24);
+  return `${d}d ${h % 24}h`;
+};
+
+// Poll countdown timer
+let pollIntervalMs = 60_000;
+let lastFetchTime = Date.now();
+let countdownInterval = null;
+
+const startCountdown = () => {
+  if (countdownInterval) clearInterval(countdownInterval);
+  countdownInterval = setInterval(() => {
+    const elapsed = Date.now() - lastFetchTime;
+    const remaining = Math.max(0, pollIntervalMs - elapsed);
+    const secs = Math.ceil(remaining / 1000);
+    if (connPoll) {
+      connPoll.textContent = secs > 0 ? `${secs}s` : 'Now';
+    }
+  }, 1000);
 };
 
 const updateVisualState = (payload) => {
@@ -156,8 +191,20 @@ const updateVisualState = (payload) => {
     connApi.textContent = connection.baseUrl || '–';
     connCollection.textContent = connection.collection ? connection.collection.substring(0, 8) + '…' : '–';
     connCollection.title = connection.collection || '';
-    connPoll.textContent = connection.pollInterval || '–';
     if (connPollDetail) connPollDetail.textContent = connection.pollInterval || '–';
+
+    // Parse poll interval for countdown (e.g. "1m" → 60000)
+    const match = connection.pollInterval?.match(/^(\d+)m$/);
+    if (match) pollIntervalMs = Number(match[1]) * 60_000;
+  }
+
+  // Stats
+  const stats = status.stats;
+  if (stats) {
+    if (statUptime) statUptime.textContent = formatUptime(stats.uptimeMs);
+    if (statRecords) statRecords.textContent = stats.totalRecordsSent != null ? stats.totalRecordsSent.toLocaleString() : '–';
+    if (statSuccessRate) statSuccessRate.textContent = stats.successRate != null ? `${stats.successRate}%` : '–';
+    if (statPollDuration) statPollDuration.textContent = stats.lastPollDurationMs != null ? `${stats.lastPollDurationMs}ms` : '–';
   }
 
   // Error log
@@ -230,6 +277,7 @@ const fetchStatus = async () => {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     dashboardErrors = []; // clear local errors on successful connect
+    lastFetchTime = Date.now();
     updateVisualState(data);
   } catch (error) {
     handleError(error);
@@ -257,5 +305,10 @@ const toggleBridge = async () => {
 
 toggleButton.addEventListener('click', toggleBridge);
 
-fetchStatus();
-setInterval(fetchStatus, 60_000);
+// Initial fetch, then poll in sync with the bridge interval
+fetchStatus().then(() => {
+  startCountdown();
+  setInterval(() => {
+    fetchStatus();
+  }, pollIntervalMs);
+});

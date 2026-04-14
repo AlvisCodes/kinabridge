@@ -1,8 +1,17 @@
 import fetch from 'node-fetch';
+import http from 'http';
+import https from 'https';
 import pRetry from 'p-retry';
 import config from './config.js';
 import logger from './logger.js';
 import { getDeviceId } from './deviceManager.js';
+
+// Keep-alive agents — reuse TCP+TLS connections across requests
+const httpAgent = new http.Agent({ keepAlive: true, keepAliveMsecs: 30_000 });
+const httpsAgent = new https.Agent({ keepAlive: true, keepAliveMsecs: 30_000 });
+const getAgent = (url) => (url.startsWith('https') ? httpsAgent : httpAgent);
+
+const REQUEST_TIMEOUT_MS = 15_000;
 
 const parseJsonSafely = async (response) => {
   try {
@@ -46,6 +55,8 @@ class KinabaseClient {
     const options = {
       method,
       headers,
+      agent: getAgent(url),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     };
 
     if (body) {
@@ -183,6 +194,7 @@ class KinabaseClient {
     };
 
     const url = `${this.#baseUrl}/collections/${collection}/ingest`;
+    const payloadBody = JSON.stringify(payload);
 
     logger.debug(
       { url, recordCount: ingestRecords.length },
@@ -199,7 +211,9 @@ class KinabaseClient {
             'Content-Type': 'application/json',
             'ngrok-skip-browser-warning': 'true',
           },
-          body: JSON.stringify(payload),
+          body: payloadBody,
+          agent: getAgent(url),
+          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
         });
 
         if (response.ok) {
