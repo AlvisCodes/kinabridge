@@ -128,7 +128,12 @@ const start = async () => {
       }
 
       // Update device heartbeat each cycle
-      await refreshDeviceHeartbeat(kinabaseClient);
+      try {
+        await refreshDeviceHeartbeat(kinabaseClient);
+      } catch (heartbeatErr) {
+        logger.warn({ err: heartbeatErr }, 'Device heartbeat update failed');
+        recordKinabaseFailure(new Error(`Device heartbeat: ${heartbeatErr.message}`));
+      }
 
       const lastTimestamp = state.lastTimestamp;
 
@@ -180,9 +185,32 @@ const start = async () => {
       try {
         const result = await kinabaseClient.upsertRecords(kinabaseRecords);
         sent = result.sent;
-        // Cache latest sensor values for the dashboard
-        const latestData = kinabaseRecords.length > 0 ? kinabaseRecords[kinabaseRecords.length - 1].data : null;
-        recordKinabaseSuccess(latestData);
+
+        // Record each error from the upsert cycle
+        if (result.errors?.length > 0) {
+          for (const err of result.errors) {
+            recordKinabaseFailure(err);
+          }
+        }
+
+        // Only mark success if at least some records went through AND no errors
+        if (sent > 0 && (!result.errors || result.errors.length === 0)) {
+          const latestData = kinabaseRecords.length > 0 ? kinabaseRecords[kinabaseRecords.length - 1].data : null;
+          recordKinabaseSuccess(latestData);
+        } else if (sent > 0) {
+          // Partial success — still cache readings but don't clear lastError
+          const latestData = kinabaseRecords.length > 0 ? kinabaseRecords[kinabaseRecords.length - 1].data : null;
+          recordKinabaseSuccess(latestData);
+          logger.warn(
+            { sent, errorCount: result.errors.length },
+            'Partial success — some records synced but errors occurred'
+          );
+        } else if (result.errors?.length > 0) {
+          logger.error(
+            { errorCount: result.errors.length },
+            'All records failed to sync — check error log'
+          );
+        }
       } catch (error) {
         recordKinabaseFailure(error);
         throw error;

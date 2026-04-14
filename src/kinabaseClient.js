@@ -93,6 +93,7 @@ class KinabaseClient {
 
     // Collect records that have existing Kinabase IDs for batch ingest
     const ingestBatch = [];
+    const errors = [];
 
     for (const [readingId, record] of latestByReadingId) {
       try {
@@ -120,6 +121,7 @@ class KinabaseClient {
           { error: error.message, readingId },
           'Failed to upsert record in Kinabase'
         );
+        errors.push(error);
       }
     }
 
@@ -133,11 +135,12 @@ class KinabaseClient {
           { error: error.message, batchSize: ingestBatch.length },
           'Failed to ingest telemetry batch'
         );
+        errors.push(error);
       }
     }
 
-    logger.info({ sent, readings: sent }, `✓ Synced ${sent} reading(s) to Kinabase`);
-    return { sent };
+    logger.info({ sent, errors: errors.length }, `✓ Synced ${sent} reading(s) to Kinabase${errors.length ? ` (${errors.length} error(s))` : ''}`);
+    return { sent, errors };
   }
 
   /**
