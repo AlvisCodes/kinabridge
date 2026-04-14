@@ -31,6 +31,25 @@ const readingEnergy = $('reading-energy');
 const readingData = $('reading-data');
 const readingLight = $('reading-light');
 
+// Error panel elements
+const errorPanel = $('error-panel');
+const errorCount = $('error-count');
+const errorList = $('error-list');
+const errorToggle = $('error-toggle');
+
+// Error panel collapsed state
+let errorCollapsed = false;
+errorToggle?.addEventListener('click', () => {
+  errorCollapsed = !errorCollapsed;
+  errorPanel.classList.toggle('collapsed', errorCollapsed);
+});
+// Also toggle when clicking the header area
+$('error-panel')?.querySelector('.error-panel-header')?.addEventListener('click', (e) => {
+  if (e.target.closest('.error-toggle-btn')) return; // already handled
+  errorCollapsed = !errorCollapsed;
+  errorPanel.classList.toggle('collapsed', errorCollapsed);
+});
+
 const formatTimestamp = (value) => {
   if (!value) return '–';
   try {
@@ -54,7 +73,7 @@ const formatReading = (value, decimals = 1) => {
 const updateVisualState = (payload) => {
   const { bridgeEnabled, kinabase, lastTimestamp: latestPoint, device, connection } = payload;
   const status = kinabase || {};
-  const { connected, lastSuccess: successAt, lastError, lastReadings } = status;
+  const { connected, lastSuccess: successAt, lastError, lastReadings, errorLog: errors } = status;
 
   // Reset classes
   bridgeIndicator.classList.remove('status-on', 'status-off', 'status-idle');
@@ -140,7 +159,47 @@ const updateVisualState = (payload) => {
     connPoll.textContent = connection.pollInterval || '–';
     if (connPollDetail) connPollDetail.textContent = connection.pollInterval || '–';
   }
+
+  // Error log
+  renderErrors(errors);
 };
+
+const formatErrorTime = (value) => {
+  if (!value) return '–';
+  try {
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return '–';
+    return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  } catch { return '–'; }
+};
+
+const renderErrors = (errors) => {
+  if (!errorPanel || !errorList || !errorCount) return;
+
+  const items = Array.isArray(errors) ? errors : [];
+  if (items.length === 0) {
+    errorPanel.style.display = 'none';
+    return;
+  }
+
+  errorPanel.style.display = '';
+  errorCount.textContent = items.length;
+  errorList.innerHTML = items.map(e => `
+    <div class="error-item">
+      <span class="error-time">${formatErrorTime(e.timestamp)}</span>
+      <span class="error-msg">${escapeHtml(e.message)}</span>
+    </div>
+  `).join('');
+};
+
+const escapeHtml = (str) => {
+  const div = document.createElement('div');
+  div.textContent = str || '';
+  return div.innerHTML;
+};
+
+// Track connection-level errors for display in the error panel
+let dashboardErrors = [];
 
 const handleError = (error) => {
   bridgeIndicator.classList.remove('status-on', 'status-idle');
@@ -154,6 +213,14 @@ const handleError = (error) => {
   headerStatusText.textContent = 'Offline';
   toggleButton.textContent = 'Retry';
   toggleButton.disabled = false;
+
+  // Show connection error in the error panel
+  dashboardErrors.unshift({
+    message: `Dashboard: ${error?.message || 'Connection failed'}`,
+    timestamp: new Date().toISOString(),
+  });
+  if (dashboardErrors.length > 20) dashboardErrors.length = 20;
+  renderErrors(dashboardErrors);
 };
 
 const fetchStatus = async () => {
@@ -162,6 +229,7 @@ const fetchStatus = async () => {
     const response = await fetch('/api/status', { cache: 'no-store' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
+    dashboardErrors = []; // clear local errors on successful connect
     updateVisualState(data);
   } catch (error) {
     handleError(error);

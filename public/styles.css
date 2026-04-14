@@ -463,6 +463,142 @@ body {
   padding: 1rem 0 0;
 }
 
+/* ── Error Panel ──────────────────────────────── */
+.error-panel {
+  padding: 0;
+  border: 1px solid rgba(239, 68, 68, 0.18);
+  background: rgba(255, 255, 255, 0.6);
+  overflow: hidden;
+}
+
+.error-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.85rem 1.25rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.error-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #dc2626;
+}
+
+.error-icon-wrap {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--red-bg);
+  color: #dc2626;
+  flex-shrink: 0;
+}
+
+.error-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 100px;
+  background: var(--red);
+  color: white;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.error-toggle-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  border: none;
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.error-toggle-btn:hover {
+  background: rgba(0, 0, 0, 0.08);
+}
+
+.error-toggle-btn svg {
+  transition: transform 0.25s ease;
+}
+
+.error-panel.collapsed .error-toggle-btn svg {
+  transform: rotate(-90deg);
+}
+
+.error-list {
+  border-top: 1px solid rgba(239, 68, 68, 0.1);
+  max-height: 280px;
+  overflow-y: auto;
+  transition: max-height 0.3s ease, opacity 0.2s ease;
+}
+
+.error-panel.collapsed .error-list {
+  max-height: 0;
+  border-top-color: transparent;
+  opacity: 0;
+}
+
+.error-item {
+  display: flex;
+  gap: 0.75rem;
+  padding: 0.7rem 1.25rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.04);
+  align-items: flex-start;
+}
+
+.error-item:last-child {
+  border-bottom: none;
+}
+
+.error-time {
+  font-size: 0.65rem;
+  font-weight: 500;
+  color: var(--text-tertiary);
+  font-family: 'SF Mono', ui-monospace, monospace;
+  white-space: nowrap;
+  padding-top: 1px;
+  flex-shrink: 0;
+  min-width: 56px;
+}
+
+.error-msg {
+  font-size: 0.75rem;
+  color: var(--text-primary);
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.error-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.error-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.error-list::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+  border-radius: 100px;
+}
+
 /* ── Responsive ───────────────────────────────── */
 @media (max-width: 768px) {
   .readings-grid { grid-template-columns: repeat(3, 1fr); }
