@@ -146,6 +146,15 @@ const start = async () => {
         return;
       }
 
+      // Log what InfluxDB gave us
+      const influxFields = records.length > 0
+        ? [...new Set(records.flatMap(r => Object.keys(r.fields || {})))]
+        : [];
+      logger.info(
+        { influxRecords: records.length, influxFields, latestTimestamp },
+        `Fetched ${records.length} record(s) from InfluxDB with fields: ${influxFields.join(', ')}`
+      );
+
       const kinabaseRecords = toKinabaseRecords(records);
 
       if (!kinabaseRecords.length) {
@@ -157,6 +166,15 @@ const start = async () => {
         }
         return;
       }
+
+      // Log what we're about to send to Kinabase
+      const outFields = kinabaseRecords.length > 0
+        ? Object.keys(kinabaseRecords[0].data)
+        : [];
+      logger.info(
+        { kinabaseRecords: kinabaseRecords.length, outFields, fieldCount: outFields.length },
+        `Sending ${kinabaseRecords.length} record(s) to Kinabase with ${outFields.length} fields: ${outFields.join(', ')}`
+      );
 
       let sent = 0;
       try {

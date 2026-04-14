@@ -70,6 +70,7 @@ class KinabaseClient {
    */
   async upsertRecords(records) {
     if (!records || !records.length) {
+      logger.debug('upsertRecords called with no records — nothing to do');
       return { sent: 0 };
     }
 
@@ -85,6 +86,11 @@ class KinabaseClient {
       }
     }
 
+    logger.info(
+      { totalRecords: records.length, uniqueReadingIds: latestByReadingId.size },
+      `Processing ${latestByReadingId.size} unique reading(s) from ${records.length} record(s)`
+    );
+
     // Collect records that have existing Kinabase IDs for batch ingest
     const ingestBatch = [];
 
@@ -93,9 +99,14 @@ class KinabaseClient {
         const existingRecordId = await this.#findRecordByReadingId(collection, readingId);
 
         if (existingRecordId) {
+          logger.debug(
+            { readingId, kinabaseId: existingRecordId, fields: Object.keys(record.data) },
+            'Queuing existing record for ingest'
+          );
           ingestBatch.push({ kinabaseId: existingRecordId, record });
         } else {
           // Create new record with all fields + device link
+          logger.info({ readingId }, 'No existing record — creating new one');
           const createData = { ...record.data, lastReadingAt: new Date().toISOString() };
           const deviceId = getDeviceId();
           if (deviceId) {
@@ -118,7 +129,10 @@ class KinabaseClient {
         await this.#ingestRecords(collection, ingestBatch);
         sent += ingestBatch.length;
       } catch (error) {
-        logger.error({ error: error.message }, 'Failed to ingest telemetry batch');
+        logger.error(
+          { error: error.message, batchSize: ingestBatch.length },
+          'Failed to ingest telemetry batch'
+        );
       }
     }
 
@@ -139,7 +153,7 @@ class KinabaseClient {
 
       if (d.temperatureC != null) data.temperatureC = d.temperatureC;
       if (d.humidity != null) data.humidity = d.humidity;
-      if (d.atmospheric_pressure != null) data.atmospheric_pressure = d.atmospheric_pressure;
+      if (d.pressure != null) data.pressure = d.pressure;
       if (d.battery_level != null) data.battery_level = d.battery_level;
       if (d.signal_strength != null) data.signal_strength = d.signal_strength;
       if (d.voltage != null) data.voltage = d.voltage;
@@ -148,6 +162,11 @@ class KinabaseClient {
       if (d.energy_used != null) data.energy_used = d.energy_used;
       if (d.data_transmitted != null) data.data_transmitted = d.data_transmitted;
       if (d.light_level != null) data.light_level = d.light_level;
+
+      logger.debug(
+        { kinabaseId, fields: Object.keys(data), fieldCount: Object.keys(data).length },
+        `Preparing ingest for record ${kinabaseId}`
+      );
 
       return {
         id: String(kinabaseId),
@@ -181,16 +200,48 @@ class KinabaseClient {
         });
 
         if (response.ok) {
+          // Always parse the ingest response — the API returns 200 even when
+          // individual records fail (e.g. unknown fields, wrong types).
+          const body = await parseJsonSafely(response);
+
+          if (body?.failedRecords > 0) {
+            const errorDetails = (body.errors || [])
+              .map(e => `record ${e.recordId}: ${e.error} (${e.errorCode})`)
+              .join('; ');
+
+            logger.error(
+              {
+                totalRecords: body.totalRecords,
+                processedRecords: body.processedRecords,
+                failedRecords: body.failedRecords,
+                errors: body.errors,
+                url,
+              },
+              `⚠ Ingest partially failed: ${body.failedRecords}/${body.totalRecords} record(s) rejected — ${errorDetails}`
+            );
+
+            // Throw so the caller knows data didn't land
+            const error = new Error(
+              `Ingest rejected ${body.failedRecords} record(s): ${errorDetails}`
+            );
+            error.name = 'AbortError'; // don't retry field-name errors
+            throw error;
+          }
+
           logger.info(
-            { count: ingestRecords.length },
-            '✓ Ingested telemetry batch'
+            {
+              totalRecords: body?.totalRecords,
+              processedRecords: body?.processedRecords,
+              count: ingestRecords.length,
+            },
+            `✓ Ingested ${body?.processedRecords ?? ingestRecords.length} telemetry record(s)`
           );
           return;
         }
 
         if (response.status === 401) {
           const body = await parseJsonSafely(response);
-          logger.error({ status: 401, body, url }, 'Ingest auth failed');
+          logger.error({ status: 401, body, url }, 'Ingest auth failed — check JWT token');
           const error = new Error('Ingest authentication failed (401)');
           error.name = 'AbortError';
           throw error;
@@ -198,11 +249,12 @@ class KinabaseClient {
 
         if (response.status >= 500) {
           const text = await response.text();
+          logger.error({ status: response.status, text: text.substring(0, 500), url }, 'Kinabase server error during ingest');
           throw new Error(`Kinabase ingest ${response.status}: ${text}`);
         }
 
         const body = await parseJsonSafely(response);
-        logger.error({ status: response.status, body, url }, 'Ingest rejected');
+        logger.error({ status: response.status, body, url }, 'Ingest rejected by API');
         const error = new Error(`Ingest failed: ${response.status} - ${JSON.stringify(body)}`);
         error.name = 'AbortError';
         throw error;

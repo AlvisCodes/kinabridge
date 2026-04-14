@@ -124,7 +124,7 @@ if (transformed.length > 0) {
     ['reading_id', d.reading_id === 'EnvironmentalSensor'],
     ['temperatureC', Math.abs(d.temperatureC - 295.55) < 0.01],
     ['humidity', d.humidity === 55.1],
-    ['atmospheric_pressure', d.atmospheric_pressure === 1013.25],
+    ['pressure', d.pressure === 1013.25],
     ['battery_level', d.battery_level === 87],
     ['signal_strength', d.signal_strength === -42],
     ['voltage', d.voltage === 3.28],
@@ -177,7 +177,7 @@ if (sparseTransformed.length > 0) {
     ['reading_id', s.reading_id === 'EnvironmentalSensor'],
     ['temperatureC', Math.abs(s.temperatureC - 294.15) < 0.01],
     ['humidity', s.humidity === 60.0],
-    ['atmospheric_pressure', s.atmospheric_pressure === 1010.0],
+    ['pressure', s.pressure === 1010.0],
   ];
   for (const [field, ok] of realChecks) {
     if (ok) pass(`sparse.${field}`, JSON.stringify(s[field]));
@@ -204,9 +204,9 @@ if (sparseTransformed.length > 0) {
 }
 
 // ─────────────────────────────────────────────
-// 2c. kPa→hPa guard for atmospheric_pressure
+// 2c. kPa→hPa guard for pressure
 // ─────────────────────────────────────────────
-console.log('\n🔧 2c. atmospheric_pressure kPa→hPa guard\n');
+console.log('\n🔧 2c. pressure kPa→hPa guard\n');
 
 // Simulate Pi sending atmospheric_pressure in kPa (wrong unit)
 const kpaRecords = toKinabaseRecords([{
@@ -218,17 +218,17 @@ const kpaRecords = toKinabaseRecords([{
 
 if (kpaRecords.length === 1) {
   const k = kpaRecords[0].data;
-  // atmospheric_pressure should prefer the explicit field and auto-correct kPa → hPa
-  if (Math.abs(k.atmospheric_pressure - 1012) < 1) {
-    pass('atmospheric_pressure kPa→hPa', `${k.atmospheric_pressure} hPa (auto-corrected from 10.12 kPa)`);
+  // pressure should prefer the explicit atmospheric_pressure field and auto-correct kPa → hPa
+  if (Math.abs(k.pressure - 1012) < 1) {
+    pass('pressure kPa→hPa', `${k.pressure} hPa (auto-corrected from 10.12 kPa)`);
   } else {
-    fail('atmospheric_pressure kPa→hPa', `expected ~1012, got ${k.atmospheric_pressure}`);
+    fail('pressure kPa→hPa', `expected ~1012, got ${k.pressure}`);
   }
 } else {
   fail('kPa guard', 'no records');
 }
 
-// Test atmospheric_pressure default when no pressure at all
+// Test pressure default when no pressure at all
 const noPressureRecords = toKinabaseRecords([{
   machine: 'EnvironmentalSensor',
   timestamp: new Date().toISOString(),
@@ -238,13 +238,13 @@ const noPressureRecords = toKinabaseRecords([{
 
 if (noPressureRecords.length === 1) {
   const n = noPressureRecords[0].data;
-  if (n.atmospheric_pressure === 1013.25) {
-    pass('atmospheric_pressure default', `${n.atmospheric_pressure} hPa (standard atmosphere)`);
+  if (n.pressure === 1013.25) {
+    pass('pressure default', `${n.pressure} hPa (standard atmosphere)`);
   } else {
-    fail('atmospheric_pressure default', `expected 1013.25, got ${n.atmospheric_pressure}`);
+    fail('pressure default', `expected 1013.25, got ${n.pressure}`);
   }
 } else {
-  fail('atmospheric_pressure default', 'no records');
+  fail('pressure default', 'no records');
 }
 
 // ─────────────────────────────────────────────
@@ -468,7 +468,7 @@ if (collectionAccessible && token) {
     humidity: 55.1,
     battery_level: 100,
     signal_strength: -10,
-    atmospheric_pressure: 1013.25,
+    pressure: 1013.25,
     voltage: 3.3,
     current_draw: 100.0,
     power_consumption: 0.33,
@@ -513,7 +513,7 @@ if (collectionAccessible && token) {
               data: {
                 temperatureC: 33.3,
                 humidity: 66.6,
-                atmospheric_pressure: 1020.5,
+                pressure: 1020.5,
                 battery_level: 50,
                 signal_strength: -55,
                 voltage: 3.1,
@@ -543,7 +543,14 @@ if (collectionAccessible && token) {
       });
 
       if (resp.ok) {
-        pass('POST ingest telemetry', `record ${testRecordId}, temperatureC→33.3, humidity→66.6`);
+        const body = await resp.json();
+        // Check the response body — API returns 200 even when records fail!
+        if (body.failedRecords > 0) {
+          const errors = (body.errors || []).map(e => `${e.error} (${e.errorCode})`).join('; ');
+          fail('POST ingest telemetry', `HTTP 200 but ${body.failedRecords} record(s) rejected: ${errors}`);
+        } else {
+          pass('POST ingest telemetry', `processed=${body.processedRecords}/${body.totalRecords}, record ${testRecordId}`);
+        }
       } else {
         const text = await resp.text();
         fail('POST ingest telemetry', `HTTP ${resp.status}: ${text.substring(0, 200)}`);
@@ -622,7 +629,7 @@ if (collectionAccessible && token) {
     // Verify transform filled all 12 writable fields
     const expectedFields = [
       'reading_id', 'temperatureC', 'humidity',
-      'atmospheric_pressure', 'battery_level', 'signal_strength',
+      'pressure', 'battery_level', 'signal_strength',
       'voltage', 'current_draw', 'power_consumption',
       'energy_used', 'data_transmitted', 'light_level',
     ];
@@ -680,7 +687,13 @@ if (collectionAccessible && token) {
         });
 
         if (resp.ok) {
-          pass('POST ingest with fakes', `all 11 metric fields ingested for record ${fakeTestRecordId}`);
+          const body = await resp.json();
+          if (body.failedRecords > 0) {
+            const errors = (body.errors || []).map(e => `${e.error} (${e.errorCode})`).join('; ');
+            fail('POST ingest with fakes', `HTTP 200 but ${body.failedRecords} record(s) rejected: ${errors}`);
+          } else {
+            pass('POST ingest with fakes', `processed=${body.processedRecords}/${body.totalRecords} for record ${fakeTestRecordId}`);
+          }
         } else {
           const text = await resp.text();
           fail('POST ingest with fakes', `HTTP ${resp.status}: ${text.substring(0, 200)}`);
@@ -708,7 +721,7 @@ if (collectionAccessible && token) {
 
           // Metric-type fields may not appear in GET responses (stored in telemetry store)
           const metricFields = [
-            'atmospheric_pressure', 'voltage', 'current_draw', 'power_consumption',
+            'pressure', 'voltage', 'current_draw', 'power_consumption',
             'energy_used', 'data_transmitted', 'light_level',
           ];
 
@@ -757,6 +770,275 @@ if (collectionAccessible && token) {
   }
 } else {
   skip('Fake-defaults E2E', 'collection not accessible');
+}
+
+// ─────────────────────────────────────────────
+// 7f. Ingest response body validation (the bug that bit us!)
+// ─────────────────────────────────────────────
+console.log('\n🚨 7f. Ingest Response Validation\n');
+
+if (collectionAccessible && token) {
+  const collectionBase = `${config.kinabase.baseUrl}/collections/${config.kinabase.collection}`;
+  const ingestUrl = `${config.kinabase.baseUrl}/collections/${config.kinabase.collection}/ingest`;
+  let validationRecordId = null;
+
+  // Create a disposable record
+  try {
+    const resp = await fetch(collectionBase, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({ data: { reading_id: `_INGEST_VALIDATE_${Date.now()}`, temperatureC: 290, humidity: 50, pressure: 1013, battery_level: 100, signal_strength: -30, lastReadingAt: new Date().toISOString() } }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (resp.ok) {
+      const body = await resp.json();
+      validationRecordId = body.id || body.data?.id;
+    }
+  } catch { /* ignore */ }
+
+  if (validationRecordId) {
+    // 7f-a. Good payload → processedRecords=1, failedRecords=0
+    try {
+      const goodPayload = {
+        mode: 'FUTURE_FACING',
+        records: [{
+          id: String(validationRecordId),
+          changes: [{ timestamp: new Date().toISOString(), data: { temperatureC: 295.0, humidity: 44.0, pressure: 1010.0 } }],
+        }],
+      };
+      const resp = await fetch(ingestUrl, { method: 'POST', headers: authHeaders, body: JSON.stringify(goodPayload), signal: AbortSignal.timeout(10000) });
+      const body = await resp.json();
+
+      if (body.processedRecords === 1 && body.failedRecords === 0) {
+        pass('Good ingest → processedRecords=1', `processed=${body.processedRecords}, failed=${body.failedRecords}`);
+      } else {
+        fail('Good ingest response', `processed=${body.processedRecords}, failed=${body.failedRecords}, errors=${JSON.stringify(body.errors)}`);
+      }
+    } catch (err) {
+      fail('Good ingest response', err.message);
+    }
+
+    // 7f-b. Bad field name → HTTP 200 but failedRecords=1
+    try {
+      const badPayload = {
+        mode: 'FUTURE_FACING',
+        records: [{
+          id: String(validationRecordId),
+          changes: [{ timestamp: new Date().toISOString(), data: { totally_bogus_field: 999 } }],
+        }],
+      };
+      const resp = await fetch(ingestUrl, { method: 'POST', headers: authHeaders, body: JSON.stringify(badPayload), signal: AbortSignal.timeout(10000) });
+      const body = await resp.json();
+
+      if (resp.status === 200 && body.failedRecords === 1) {
+        const errorMsg = body.errors?.[0]?.error || 'no error detail';
+        pass('Bad field → rejected in body', `HTTP 200 but failedRecords=1: ${errorMsg}`);
+      } else if (body.failedRecords > 0) {
+        pass('Bad field → rejected', `failedRecords=${body.failedRecords}`);
+      } else {
+        fail('Bad field detection', `expected failedRecords=1 but got processed=${body.processedRecords}, failed=${body.failedRecords}`);
+      }
+    } catch (err) {
+      fail('Bad field detection', err.message);
+    }
+
+    // 7f-c. Verify transform output matches what ingest accepts (full E2E field test)
+    try {
+      const transformOutput = toKinabaseRecords([{
+        machine: 'FieldMatchTest',
+        timestamp: new Date().toISOString(),
+        source: 'test',
+        fields: { temperature: 22.0, humidity: 50.0, pressure: 1012.0 },
+      }]);
+      const tData = transformOutput[0]?.data;
+      if (!tData) throw new Error('no transform output');
+
+      // Build ingest payload using EXACTLY the fields transform produces (minus reading_id)
+      const ingestData = { ...tData, lastReadingAt: new Date().toISOString() };
+      delete ingestData.reading_id;
+
+      const fullPayload = {
+        mode: 'FUTURE_FACING',
+        records: [{
+          id: String(validationRecordId),
+          changes: [{ timestamp: new Date().toISOString(), data: ingestData }],
+        }],
+      };
+      const resp = await fetch(ingestUrl, { method: 'POST', headers: authHeaders, body: JSON.stringify(fullPayload), signal: AbortSignal.timeout(10000) });
+      const body = await resp.json();
+
+      if (body.processedRecords === 1 && body.failedRecords === 0) {
+        pass('Transform→Ingest E2E field match', `all ${Object.keys(ingestData).length} fields accepted (${Object.keys(ingestData).join(', ')})`);
+      } else {
+        const errors = (body.errors || []).map(e => e.error).join('; ');
+        fail('Transform→Ingest E2E field match', `rejected: ${errors}`);
+      }
+    } catch (err) {
+      fail('Transform→Ingest E2E field match', err.message);
+    }
+
+    // Cleanup
+    try {
+      await fetch(`${collectionBase}/${validationRecordId}`, { method: 'DELETE', headers: authHeaders, signal: AbortSignal.timeout(10000) });
+      pass('DELETE cleanup validation record', `removed ${validationRecordId}`);
+    } catch { /* ignore */ }
+  } else {
+    skip('Ingest response validation', 'could not create test record');
+  }
+} else {
+  skip('Ingest response validation', 'collection not accessible');
+}
+
+// ─────────────────────────────────────────────
+// 2d. Transform → Kinabase field name consistency
+// ─────────────────────────────────────────────
+console.log('\n🔗 2d. Transform → Kinabase Field Consistency\n');
+
+{
+  // These are the ONLY field names the Kinabase Sensor Readings collection accepts.
+  // If transform produces anything else, ingest will silently fail with "Unknown fields".
+  const KNOWN_KINABASE_FIELDS = new Set([
+    'reading_id', 'temperatureC', 'humidity', 'pressure',
+    'battery_level', 'signal_strength', 'voltage', 'current_draw',
+    'power_consumption', 'energy_used', 'data_transmitted', 'light_level',
+    'lastReadingAt', 'device', 'deviceName', 'deviceType', 'location',
+  ]);
+
+  const testRecord = toKinabaseRecords([{
+    machine: 'FieldConsistencyTest',
+    timestamp: new Date().toISOString(),
+    source: 'test',
+    fields: { temperature: 22.0, humidity: 50.0, pressure: 1013.0 },
+  }]);
+
+  if (testRecord.length > 0) {
+    const outputFields = Object.keys(testRecord[0].data);
+    const unknownFields = outputFields.filter(f => !KNOWN_KINABASE_FIELDS.has(f));
+
+    if (unknownFields.length === 0) {
+      pass('All transform fields match Kinabase schema', outputFields.join(', '));
+    } else {
+      fail('Transform produces unknown fields', `${unknownFields.join(', ')} — these will cause ingest "Unknown fields" errors!`);
+    }
+
+    // Ensure critical fields are always present
+    const requiredFields = ['reading_id', 'temperatureC', 'humidity', 'pressure', 'battery_level', 'signal_strength'];
+    const missingRequired = requiredFields.filter(f => !(f in testRecord[0].data));
+    if (missingRequired.length === 0) {
+      pass('All required fields present', requiredFields.join(', '));
+    } else {
+      fail('Missing required fields', missingRequired.join(', '));
+    }
+  } else {
+    fail('Field consistency check', 'no transform output');
+  }
+}
+
+// ─────────────────────────────────────────────
+// 2e. Transform edge cases
+// ─────────────────────────────────────────────
+console.log('\n🧪 2e. Transform Edge Cases\n');
+
+{
+  // Empty fields object — should still produce a record with defaults
+  const emptyFields = toKinabaseRecords([{
+    machine: 'EmptyFieldsTest',
+    timestamp: new Date().toISOString(),
+    source: 'test',
+    fields: {},
+  }]);
+  if (emptyFields.length === 1) {
+    const d = emptyFields[0].data;
+    if (d.battery_level === 100 && d.voltage === 5.0 && d.pressure === 1013.25) {
+      pass('Empty fields → all defaults', `battery=${d.battery_level}, voltage=${d.voltage}, pressure=${d.pressure}`);
+    } else {
+      fail('Empty fields → defaults', `battery=${d.battery_level}, voltage=${d.voltage}, pressure=${d.pressure}`);
+    }
+
+    // Temperature and humidity should be absent (not default-filled)
+    if (d.temperatureC == null && d.humidity == null) {
+      pass('Empty fields → no temp/humidity', 'correctly omitted when not in InfluxDB');
+    } else {
+      fail('Empty fields → no temp/humidity', `temp=${d.temperatureC}, hum=${d.humidity}`);
+    }
+  } else {
+    fail('Empty fields transform', 'wrong record count');
+  }
+
+  // Missing machine — should be skipped
+  const noMachine = toKinabaseRecords([{
+    machine: null,
+    timestamp: new Date().toISOString(),
+    source: 'test',
+    fields: { temperature: 20.0 },
+  }]);
+  if (noMachine.length === 0) {
+    pass('Null machine → skipped', '0 records');
+  } else {
+    fail('Null machine → skipped', `expected 0, got ${noMachine.length}`);
+  }
+
+  // Missing timestamp — should be skipped
+  const noTimestamp = toKinabaseRecords([{
+    machine: 'NoTimestamp',
+    timestamp: null,
+    source: 'test',
+    fields: { temperature: 20.0 },
+  }]);
+  if (noTimestamp.length === 0) {
+    pass('Null timestamp → skipped', '0 records');
+  } else {
+    fail('Null timestamp → skipped', `expected 0, got ${noTimestamp.length}`);
+  }
+
+  // String numeric values — should be parsed
+  const stringValues = toKinabaseRecords([{
+    machine: 'StringTest',
+    timestamp: new Date().toISOString(),
+    source: 'test',
+    fields: { temperature: '22.5', humidity: '55.0', pressure: '1013.0' },
+  }]);
+  if (stringValues.length === 1) {
+    const d = stringValues[0].data;
+    if (Math.abs(d.temperatureC - 295.65) < 0.01 && d.humidity === 55.0 && d.pressure === 1013.0) {
+      pass('String numeric parsing', `temp=${d.temperatureC}, hum=${d.humidity}, pres=${d.pressure}`);
+    } else {
+      fail('String numeric parsing', `temp=${d.temperatureC}, hum=${d.humidity}, pres=${d.pressure}`);
+    }
+  } else {
+    fail('String numeric parsing', 'wrong record count');
+  }
+
+  // NaN / garbage values — should fall back to defaults
+  const garbageValues = toKinabaseRecords([{
+    machine: 'GarbageTest',
+    timestamp: new Date().toISOString(),
+    source: 'test',
+    fields: { temperature: 'not_a_number', humidity: NaN, battery_level: undefined },
+  }]);
+  if (garbageValues.length === 1) {
+    const d = garbageValues[0].data;
+    if (d.temperatureC == null && d.humidity == null && d.battery_level === 100) {
+      pass('Garbage values → defaults/null', `temp=${d.temperatureC}, hum=${d.humidity}, battery=${d.battery_level}`);
+    } else {
+      fail('Garbage values', `temp=${d.temperatureC}, hum=${d.humidity}, battery=${d.battery_level}`);
+    }
+  } else {
+    fail('Garbage values', 'wrong record count');
+  }
+
+  // Kelvin conversion sanity — 0°C should be 273.15K
+  const kelvinCheck = toKinabaseRecords([{
+    machine: 'KelvinTest',
+    timestamp: new Date().toISOString(),
+    source: 'test',
+    fields: { temperature: 0 },
+  }]);
+  if (kelvinCheck.length === 1 && Math.abs(kelvinCheck[0].data.temperatureC - 273.15) < 0.001) {
+    pass('Kelvin conversion', `0°C → ${kelvinCheck[0].data.temperatureC} K`);
+  } else {
+    fail('Kelvin conversion', `expected 273.15, got ${kelvinCheck[0]?.data?.temperatureC}`);
+  }
 }
 
 // ─────────────────────────────────────────────
