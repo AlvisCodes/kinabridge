@@ -2100,23 +2100,36 @@ console.log('\n🔔 14. Alert System Validation\n');
 console.log('\n🔗 15. Endpoint URL\n');
 
 {
-  const expectedUrl = 'https://1ce1-46-17-166-115.ngrok-free.app/api/v1';
+  const expectedBaseUrl = process.env.KINABASE_BASE_URL || config.kinabase.baseUrl;
 
   // 15a. Config has correct URL
-  if (config.kinabase.baseUrl === expectedUrl || process.env.KINABASE_BASE_URL) {
-    pass('config.kinabase.baseUrl', config.kinabase.baseUrl);
+  if (process.env.KINABASE_BASE_URL) {
+    if (config.kinabase.baseUrl === process.env.KINABASE_BASE_URL) {
+      pass('config.kinabase.baseUrl', config.kinabase.baseUrl);
+    } else {
+      fail(
+        'config.kinabase.baseUrl',
+        `expected ${process.env.KINABASE_BASE_URL}, got ${config.kinabase.baseUrl}`
+      );
+    }
   } else {
-    fail('config.kinabase.baseUrl', `expected ${expectedUrl}, got ${config.kinabase.baseUrl}`);
+    pass('config.kinabase.baseUrl', config.kinabase.baseUrl);
   }
 
   // 15b. update-pi.sh has correct URL
   const fs = await import('fs');
   try {
     const script = fs.readFileSync('./update-pi.sh', 'utf-8');
-    if (script.includes('1ce1-46-17-166-115.ngrok-free.app')) {
-      pass('update-pi.sh endpoint', 'contains correct ngrok URL');
+    const match = script.match(/^KINABASE_BASE_URL=(.+)$/m);
+    if (!match) {
+      fail('update-pi.sh endpoint', 'missing KINABASE_BASE_URL line');
+    } else if (match[1].trim() === expectedBaseUrl) {
+      pass('update-pi.sh endpoint', `KINABASE_BASE_URL=${match[1].trim()}`);
     } else {
-      fail('update-pi.sh endpoint', 'wrong URL in deployment script');
+      fail(
+        'update-pi.sh endpoint',
+        `expected ${expectedBaseUrl}, got ${match[1].trim()}`
+      );
     }
   } catch (err) {
     fail('update-pi.sh', err.message);
@@ -2124,7 +2137,7 @@ console.log('\n🔗 15. Endpoint URL\n');
 
   // 15c. URL format is valid
   try {
-    const url = new URL(expectedUrl);
+    const url = new URL(expectedBaseUrl);
     if (url.protocol === 'https:' && url.pathname === '/api/v1') {
       pass('URL format', `protocol=${url.protocol}, path=${url.pathname}`);
     } else {

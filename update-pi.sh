@@ -11,7 +11,7 @@ sed -i '/^POLL_INTERVAL_MS=/d' .env
 
 # Add correct Kinabase settings for local dev
 cat >> .env << 'EOF'
-KINABASE_BASE_URL=https://1ce1-46-17-166-115.ngrok-free.app/api/v1
+KINABASE_BASE_URL=https://0458-46-17-166-115.ngrok-free.app/api/v1
 KINABASE_COLLECTION=584f2727-8b0b-4abd-8bad-e08d767e9527
 KINABASE_DEVICES_COLLECTION=1abece96-c3b3-4423-ad58-346637a0ca02
 KINABASE_API_KEY=76bd4b6a-3b0e-4b58-b539-45e3e5f6f860
@@ -27,5 +27,9 @@ echo ""
 echo "New Kinabase settings:"
 grep "^KINABASE_" .env
 grep "^POLL_INTERVAL_MS=" .env
+echo ""
+echo "Kinabase version check:"
+KINABASE_BASE_URL="$(grep '^KINABASE_BASE_URL=' .env | cut -d= -f2-)"
+curl -fsS "${KINABASE_BASE_URL}/version" || echo "⚠️  Unable to reach /version endpoint"
 echo ""
 echo "Now restart your app manually"
