@@ -6,6 +6,7 @@ const bridgeIndicator = $('bridge-indicator');
 const bridgeStatus = $('bridge-status');
 const statusDetail = $('status-detail');
 const toggleButton = $('toggle-button');
+const syncNowButton = $('sync-now-button');
 const lastSuccess = $('last-success');
 const lastTimestamp = $('last-timestamp');
 const deviceName = $('device-name');
@@ -18,6 +19,11 @@ const connApi = $('conn-api');
 const connCollection = $('conn-collection');
 const connPoll = $('conn-poll');
 const connPollDetail = $('conn-poll-detail');
+
+// Upstream banner elements
+const upstreamBanner = $('upstream-banner');
+const upstreamBannerTitle = $('upstream-banner-title');
+const upstreamBannerDetail = $('upstream-banner-detail');
 
 // Stats elements
 const statUptime = $('stat-uptime');
@@ -105,28 +111,58 @@ const startCountdown = () => {
   }, 1000);
 };
 
+// Status detail truncation — long error messages get "See more"
+const TRUNCATION_THRESHOLD = 60;
+
+const setStatusDetail = (text) => {
+  statusDetail.textContent = text;
+  statusDetail.classList.remove('status-sub--expanded', 'status-sub--has-more');
+  if (text.length > TRUNCATION_THRESHOLD) {
+    statusDetail.classList.add('status-sub--has-more');
+  }
+};
+
+statusDetail.addEventListener('click', () => {
+  if (!statusDetail.classList.contains('status-sub--has-more')) return;
+  statusDetail.classList.toggle('status-sub--expanded');
+});
+
 const updateVisualState = (payload) => {
-  const { bridgeEnabled, kinabase, lastTimestamp: latestPoint, device, connection } = payload;
+  const { bridgeEnabled, kinabase, lastTimestamp: latestPoint, device, connection, upstream } = payload;
   const status = kinabase || {};
   const { connected, lastSuccess: successAt, lastError, lastReadings, errorLog: errors } = status;
 
+  // Handle upstream banner
+  updateUpstreamBanner(upstream);
+
   // Reset classes
-  bridgeIndicator.classList.remove('status-on', 'status-off', 'status-idle');
-  headerDot.classList.remove('dot--on', 'dot--off', 'dot--idle');
-  headerBadge.classList.remove('badge--on', 'badge--off', 'badge--idle');
+  bridgeIndicator.classList.remove('status-on', 'status-off', 'status-idle', 'status-unreachable');
+  headerDot.classList.remove('dot--on', 'dot--off', 'dot--idle', 'dot--unreachable');
+  headerBadge.classList.remove('badge--on', 'badge--off', 'badge--idle', 'badge--unreachable');
+
+  const upstreamDown = upstream && upstream.state === 'disconnected';
 
   if (!bridgeEnabled) {
     bridgeStatus.textContent = 'Paused';
-    statusDetail.textContent = 'Data collection is paused. Press Resume to start again.';
+    setStatusDetail('Data collection is paused. Press Resume to start again.');
     bridgeIndicator.classList.add('status-off');
     headerDot.classList.add('dot--off');
     headerBadge.classList.add('badge--off');
     headerStatusText.textContent = 'Paused';
     toggleButton.textContent = 'Resume';
     toggleButton.classList.add('btn--resume');
+  } else if (upstreamDown) {
+    bridgeStatus.textContent = 'Server Unreachable';
+    setStatusDetail('Waiting for the Kinabase server to come back online. Operations will resume automatically.');
+    bridgeIndicator.classList.add('status-unreachable');
+    headerDot.classList.add('dot--unreachable');
+    headerBadge.classList.add('badge--unreachable');
+    headerStatusText.textContent = 'Reconnecting';
+    toggleButton.textContent = 'Pause';
+    toggleButton.classList.remove('btn--resume');
   } else if (connected) {
     bridgeStatus.textContent = 'Running';
-    statusDetail.textContent = 'Collecting and sending sensor data.';
+    setStatusDetail('Collecting and sending sensor data.');
     bridgeIndicator.classList.add('status-on');
     headerDot.classList.add('dot--on');
     headerBadge.classList.add('badge--on');
@@ -135,9 +171,9 @@ const updateVisualState = (payload) => {
     toggleButton.classList.remove('btn--resume');
   } else {
     bridgeStatus.textContent = 'Waiting for data';
-    statusDetail.textContent = lastError?.message
+    setStatusDetail(lastError?.message
       ? `Something went wrong: ${lastError.message}`
-      : 'Waiting for the first sensor reading to come through.';
+      : 'Waiting for the first sensor reading to come through.');
     bridgeIndicator.classList.add('status-idle');
     headerDot.classList.add('dot--idle');
     headerBadge.classList.add('badge--idle');
@@ -148,6 +184,7 @@ const updateVisualState = (payload) => {
 
   toggleButton.dataset.enabled = bridgeEnabled ? 'true' : 'false';
   toggleButton.disabled = false;
+  if (syncNowButton) syncNowButton.disabled = false;
 
   // Metrics
   lastSuccess.textContent = formatTimestamp(successAt);
@@ -220,6 +257,9 @@ const formatErrorTime = (value) => {
   } catch { return '–'; }
 };
 
+const VISIBLE_ERRORS_DEFAULT = 3;
+let showAllErrors = false;
+
 const renderErrors = (errors) => {
   if (!errorPanel || !errorList || !errorCount) return;
 
@@ -231,12 +271,53 @@ const renderErrors = (errors) => {
 
   errorPanel.style.display = '';
   errorCount.textContent = items.length;
-  errorList.innerHTML = items.map(e => `
+
+  const visible = showAllErrors ? items : items.slice(0, VISIBLE_ERRORS_DEFAULT);
+  const hasMore = items.length > VISIBLE_ERRORS_DEFAULT;
+
+  let html = visible.map((e, i) => `
     <div class="error-item">
       <span class="error-time">${formatErrorTime(e.timestamp)}</span>
-      <span class="error-msg">${escapeHtml(e.message)}</span>
+      <div class="error-msg-wrap">
+        <span class="error-msg" data-err-idx="${i}">${escapeHtml(e.message)}</span>
+        ${(e.message || '').length > 120 ? `<button class="error-more-btn" data-err-idx="${i}">Show more</button>` : ''}
+      </div>
     </div>
   `).join('');
+
+  if (hasMore) {
+    const remaining = items.length - VISIBLE_ERRORS_DEFAULT;
+    html += `
+      <div class="error-show-all">
+        <button class="error-show-all-btn" id="error-show-all-btn">
+          ${showAllErrors ? 'Show less' : `Show all ${items.length} errors`}
+        </button>
+      </div>
+    `;
+  }
+
+  errorList.innerHTML = html;
+
+  // Wire up per-message expand toggles
+  errorList.querySelectorAll('.error-more-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = btn.dataset.errIdx;
+      const msg = errorList.querySelector(`.error-msg[data-err-idx="${idx}"]`);
+      if (msg) {
+        const isExpanded = msg.classList.toggle('error-msg--expanded');
+        btn.textContent = isExpanded ? 'Show less' : 'Show more';
+      }
+    });
+  });
+
+  // Wire up "Show all" button
+  const showAllBtn = errorList.querySelector('#error-show-all-btn');
+  if (showAllBtn) {
+    showAllBtn.addEventListener('click', () => {
+      showAllErrors = !showAllErrors;
+      renderErrors(items);
+    });
+  }
 };
 
 const escapeHtml = (str) => {
@@ -248,6 +329,73 @@ const escapeHtml = (str) => {
 // Track connection-level errors for display in the error panel
 let dashboardErrors = [];
 
+// Track upstream disconnected state for reconnected flash
+let wasUpstreamDisconnected = false;
+let reconnectedTimer = null;
+
+// Adaptive dashboard poll — faster when upstream is disconnected
+let dashboardPollMs = null; // set after first fetch
+let dashboardPollTimer = null;
+
+const updateUpstreamBanner = (upstream) => {
+  if (!upstreamBanner) return;
+
+  if (!upstream || upstream.state === 'connected') {
+    if (wasUpstreamDisconnected) {
+      // Flash "reconnected" banner briefly
+      wasUpstreamDisconnected = false;
+      upstreamBanner.style.display = '';
+      upstreamBanner.classList.remove('upstream-banner--disconnected');
+      upstreamBanner.classList.add('upstream-banner--reconnected');
+      upstreamBannerTitle.textContent = 'Connection Restored';
+      upstreamBannerDetail.textContent = 'Operations resumed normally.';
+      clearTimeout(reconnectedTimer);
+      reconnectedTimer = setTimeout(() => {
+        upstreamBanner.style.display = 'none';
+      }, 4000);
+
+      AlertHandler.success('Operations resumed normally.', {
+        title: 'Connection Restored',
+        duration: 5000,
+      });
+    } else if (!reconnectedTimer) {
+      upstreamBanner.style.display = 'none';
+    }
+    // Switch back to normal poll cadence
+    if (dashboardPollMs !== pollIntervalMs) {
+      dashboardPollMs = pollIntervalMs;
+      scheduleDashboardPoll();
+    }
+    return;
+  }
+
+  if (upstream.state === 'disconnected') {
+    const wasAlreadyDisconnected = wasUpstreamDisconnected;
+    wasUpstreamDisconnected = true;
+    clearTimeout(reconnectedTimer);
+    reconnectedTimer = null;
+    upstreamBanner.style.display = '';
+    upstreamBanner.classList.remove('upstream-banner--reconnected');
+    upstreamBanner.classList.add('upstream-banner--disconnected');
+    upstreamBannerTitle.textContent = 'Kinabase Server Unreachable';
+    const attempt = upstream.consecutiveFailures || '?';
+    upstreamBannerDetail.textContent = `Operations paused — auto-reconnecting (attempt ${attempt})`;
+    // Poll dashboard faster for live feedback
+    if (dashboardPollMs !== 5000) {
+      dashboardPollMs = 5000;
+      scheduleDashboardPoll();
+    }
+
+    // Only toast once on initial disconnect
+    if (!wasAlreadyDisconnected) {
+      AlertHandler.warning('Operations paused — will auto-resume when server is back.', {
+        title: 'Server Unreachable',
+        duration: 6000,
+      });
+    }
+  }
+};
+
 const handleError = (error) => {
   bridgeIndicator.classList.remove('status-on', 'status-idle');
   bridgeIndicator.classList.add('status-off');
@@ -256,7 +404,7 @@ const handleError = (error) => {
   headerBadge.classList.remove('badge--on', 'badge--idle');
   headerBadge.classList.add('badge--off');
   bridgeStatus.textContent = 'Cannot connect';
-  statusDetail.textContent = error?.message || 'Unable to reach the bridge service.';
+  setStatusDetail(error?.message || 'Unable to reach the bridge service.');
   headerStatusText.textContent = 'Offline';
   toggleButton.textContent = 'Retry';
   toggleButton.disabled = false;
@@ -268,6 +416,11 @@ const handleError = (error) => {
   });
   if (dashboardErrors.length > 20) dashboardErrors.length = 20;
   renderErrors(dashboardErrors);
+
+  AlertHandler.danger(error?.message || 'Unable to reach the bridge service.', {
+    title: 'Request Failed',
+    duration: 6000,
+  });
 };
 
 const fetchStatus = async () => {
@@ -275,7 +428,12 @@ const fetchStatus = async () => {
   try {
     const response = await fetch('/api/status', { cache: 'no-store' });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const data = await response.json();
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      throw new Error('Invalid JSON response from server');
+    }
     dashboardErrors = []; // clear local errors on successful connect
     lastFetchTime = Date.now();
     updateVisualState(data);
@@ -298,6 +456,12 @@ const toggleBridge = async () => {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     updateVisualState(data);
+
+    if (!enabled) {
+      AlertHandler.success('Sensor data collection resumed.', { title: 'Bridge Resumed' });
+    } else {
+      AlertHandler.info('Sensor data collection paused.', { title: 'Bridge Paused' });
+    }
   } catch (error) {
     handleError(error);
   }
@@ -305,10 +469,74 @@ const toggleBridge = async () => {
 
 toggleButton.addEventListener('click', toggleBridge);
 
-// Initial fetch, then poll in sync with the bridge interval
+// Manual poll trigger ("Sync Now") — calls POST /api/poll-now
+const triggerSyncNow = async () => {
+  if (!syncNowButton) return;
+  syncNowButton.disabled = true;
+  syncNowButton.textContent = 'Syncing…';
+
+  try {
+    const response = await fetch('/api/poll-now', { method: 'POST' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      throw new Error('Invalid JSON response');
+    }
+    if (data.triggered) {
+      updateVisualState(data);
+      lastFetchTime = Date.now();
+      AlertHandler.success('Manual sync completed successfully.', { title: 'Sync Complete' });
+    }
+  } catch (error) {
+    AlertHandler.danger(error?.message || 'Sync failed.', {
+      title: 'Request Failed',
+      duration: 6000,
+    });
+  } finally {
+    if (syncNowButton) {
+      syncNowButton.disabled = false;
+      syncNowButton.textContent = 'Sync Now';
+    }
+  }
+};
+syncNowButton?.addEventListener('click', triggerSyncNow);
+
+// Adaptive poll scheduler — polls more frequently when upstream is disconnected
+const scheduleDashboardPoll = () => {
+  clearTimeout(dashboardPollTimer);
+  dashboardPollTimer = setTimeout(async () => {
+    await fetchStatus();
+    scheduleDashboardPoll();
+  }, dashboardPollMs);
+};
+
+// Cleanup timers when user navigates away
+window.addEventListener('beforeunload', () => {
+  if (countdownInterval) clearInterval(countdownInterval);
+  if (dashboardPollTimer) clearTimeout(dashboardPollTimer);
+});
+
+// Browser offline/online detection
+window.addEventListener('offline', () => {
+  bridgeStatus.textContent = 'Browser Offline';
+  setStatusDetail('Your network connection is down. Dashboard will resume when reconnected.');
+  bridgeIndicator.classList.remove('status-on', 'status-idle', 'status-unreachable');
+  bridgeIndicator.classList.add('status-off');
+  headerDot.classList.remove('dot--on', 'dot--idle', 'dot--unreachable');
+  headerDot.classList.add('dot--off');
+  headerStatusText.textContent = 'Offline';
+});
+
+window.addEventListener('online', () => {
+  fetchStatus();
+  AlertHandler.success('Network connection restored.', { title: 'Back Online' });
+});
+
+// Initial fetch, then poll with adaptive interval
 fetchStatus().then(() => {
+  dashboardPollMs = dashboardPollMs || pollIntervalMs;
   startCountdown();
-  setInterval(() => {
-    fetchStatus();
-  }, pollIntervalMs);
+  scheduleDashboardPoll();
 });

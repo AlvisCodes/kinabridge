@@ -36,6 +36,19 @@
     </nav>
 
     <main class="main-content">
+      <!-- Upstream connection banner -->
+      <div class="upstream-banner" id="upstream-banner" style="display:none">
+        <div class="upstream-banner-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+        </div>
+        <div class="upstream-banner-text">
+          <span class="upstream-banner-title" id="upstream-banner-title">Server Unreachable</span>
+          <span class="upstream-banner-detail" id="upstream-banner-detail">Auto-reconnecting…</span>
+        </div>
+      </div>
+
       <!-- Bridge Status -->
       <div class="glass-card status-card">
         <div class="status-card-inner">
@@ -46,7 +59,10 @@
               <div class="status-sub" id="status-detail">Connecting to services…</div>
             </div>
           </div>
-          <button id="toggle-button" class="btn-toggle" disabled>Loading…</button>
+          <div class="status-actions">
+            <button id="sync-now-button" class="btn-sync" disabled>Sync Now</button>
+            <button id="toggle-button" class="btn-toggle" disabled>Loading…</button>
+          </div>
         </div>
       </div>
 
@@ -251,6 +267,7 @@
 
       <footer class="app-footer">Kinabridge</footer>
     </main>
+    <script src="/alerts.js"></script>
     <script src="/app.js" type="module"></script>
   </body>
 </html>

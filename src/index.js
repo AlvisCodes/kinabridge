@@ -9,6 +9,7 @@ import { createTokenProvider } from './kinabaseAuth.js';
 import KinabaseClient from './kinabaseClient.js';
 import { ensureDevice, refreshDeviceHeartbeat } from './deviceManager.js';
 import startControlServer from './controlServer.js';
+import connectionMonitor from './connectionMonitor.js';
 import {
   recordKinabaseFailure,
   recordKinabaseSuccess,
@@ -16,12 +17,50 @@ import {
   getKinabaseStatus,
 } from './statusTracker.js';
 
+/**
+ * Determines whether an error is caused by the upstream server being
+ * unreachable (network-level) rather than an application-level issue
+ * (bad credentials, validation errors, etc.).
+ */
+const isUpstreamError = (error) => {
+  if (!error) return false;
+  const msg = (error.message || '').toLowerCase();
+  const code = (error.code || '');
+
+  // Node.js system-level socket / DNS errors
+  if (/^(ECONNREFUSED|ENOTFOUND|ETIMEDOUT|ECONNRESET|EPIPE|EHOSTUNREACH|ENETUNREACH|EAI_AGAIN)$/i.test(code)) {
+    return true;
+  }
+  // AbortSignal.timeout() fires a TimeoutError
+  if (error.name === 'TimeoutError') return true;
+  // Fetch-level failures
+  if (msg.includes('fetch failed') || msg.includes('socket hang up') || msg.includes('other side closed')) {
+    return true;
+  }
+  // ngrok returns 502/504 when the upstream server is down
+  if (/\b50[24]\b/.test(msg)) return true;
+  // ngrok returns an HTML error page with ERR_NGROK when the endpoint is offline
+  if (msg.includes('err_ngrok') || (msg.includes('ngrok') && msg.includes('offline'))) return true;
+
+  return false;
+};
+
 const args = process.argv.slice(2);
 const runOnce = args.includes('--once') || args.includes('--run-once');
 const noBrowser = args.includes('--no-browser');
 
 let isPolling = false;
 let interrupted = false;
+
+// Global crash safety — log and exit on unhandled errors
+process.on('unhandledRejection', (reason) => {
+  logger.error({ err: reason }, 'Unhandled promise rejection — shutting down');
+  process.exit(1);
+});
+process.on('uncaughtException', (error) => {
+  logger.error({ err: error }, 'Uncaught exception — shutting down');
+  process.exit(1);
+});
 
 /**
  * Opens a URL in the default browser.
@@ -48,6 +87,8 @@ const openBrowser = (url) => {
   });
 };
 
+const SHUTDOWN_TIMEOUT_MS = 10_000;
+
 const handleExit = async (signal) => {
   if (interrupted) {
     process.exit(1);
@@ -56,6 +97,21 @@ const handleExit = async (signal) => {
 
   interrupted = true;
   logger.info({ signal }, 'Received shutdown signal, finishing current cycle');
+
+  // Hard deadline — force exit if graceful shutdown takes too long
+  const forceExitTimer = setTimeout(() => {
+    logger.warn('Graceful shutdown timed out, forcing exit');
+    process.exit(1);
+  }, SHUTDOWN_TIMEOUT_MS);
+  forceExitTimer.unref();
+
+  connectionMonitor.stop();
+
+  // Close HTTP server to stop accepting new connections
+  if (controlServer) {
+    controlServer.close(() => logger.info('HTTP server closed'));
+  }
+
   if (isPolling) {
     await new Promise((resolve) => {
       const interval = setInterval(() => {
@@ -73,7 +129,7 @@ process.on('SIGINT', handleExit);
 process.on('SIGTERM', handleExit);
 
 // Start the control server and optionally open browser
-const { port } = startControlServer({
+const { port, server: controlServer, registerPollCallback } = startControlServer({
   stateProvider: loadState,
   setBridgeEnabled,
   statusProvider: getKinabaseStatus,
@@ -87,35 +143,59 @@ if (!runOnce && !noBrowser) {
 }
 
 const start = async () => {
-  // Create and validate token provider at startup
+  // ── Connection monitor — detect upstream availability ──
+  await connectionMonitor.start();
+
   const tokenProvider = createTokenProvider();
   const kinabaseClient = new KinabaseClient({ tokenProvider });
 
-  try {
-    const token = await tokenProvider();
-    if (!token || typeof token !== 'string') {
-      throw new Error('tokenProvider returned invalid token');
-    }
-    logger.info('✓ Token provider initialized successfully');
-  } catch (error) {
-    logger.error({ err: error }, 'Failed to initialize token provider - check your Kinabase credentials');
-    throw error;
-  }
+  // ── Resilient initialisation ───────────────────────────
+  // Retry token validation + device setup whenever the server is
+  // temporarily unreachable.  Non-network errors (bad credentials
+  // etc.) still fail fast so the operator can fix them.
+  const initialize = async () => {
+    let attempt = 0;
+    while (!interrupted) {
+      if (!connectionMonitor.connected) {
+        logger.info('⏸ Kinabase server is unreachable — waiting for connection before starting…');
+        await connectionMonitor.waitForConnection();
+        if (interrupted) return;
+      }
 
-  // Ensure the device record exists in Kinabase (create if missing)
-  try {
-    const deviceId = await ensureDevice(kinabaseClient);
-    logger.info({ deviceId }, '✓ Device record ready');
-  } catch (error) {
-    logger.error({ err: error }, 'Failed to ensure device record in Kinabase');
-    throw error;
-  }
+      attempt++;
+      try {
+        // Validate token
+        const token = await tokenProvider();
+        if (!token || typeof token !== 'string') {
+          throw new Error('tokenProvider returned invalid token');
+        }
+        logger.info('✓ Token provider initialized successfully');
+
+        // Ensure device record
+        const deviceId = await ensureDevice(kinabaseClient);
+        logger.info({ deviceId }, '✓ Device record ready');
+        return; // success
+      } catch (error) {
+        if (isUpstreamError(error)) {
+          logger.warn(
+            { err: error, attempt },
+            'Initialization failed (server unreachable) — will retry when connection is restored'
+          );
+          connectionMonitor.reportFailure(error.message);
+          continue; // loop back — will wait for connection at top
+        }
+        // Non-recoverable error (bad credentials, missing config, …)
+        throw error;
+      }
+    }
+  };
+
+  await initialize();
+  if (interrupted) return;
 
   // ── Startup self-test ──────────────────────────
-  // Verify InfluxDB and Kinabase are reachable before committing to the poll loop.
   logger.info('🔍 Running startup self-test...');
 
-  // Test InfluxDB
   try {
     const { records } = await fetchNewPoints({ since: new Date(Date.now() - 5 * 60_000).toISOString() });
     logger.info({ records: records.length }, `✓ InfluxDB OK — ${records.length} record(s) in last 5 min`);
@@ -123,7 +203,6 @@ const start = async () => {
     logger.warn({ err: error }, '⚠ InfluxDB self-test failed — will retry on first poll cycle');
   }
 
-  // Test Kinabase API (collection access)
   try {
     const resp = await kinabaseClient.authorizedRequest(
       'GET',
@@ -143,6 +222,14 @@ const start = async () => {
     if (isPolling) {
       logger.warn('Skipping poll because previous cycle is still running');
       return;
+    }
+
+    // ── Wait for upstream before attempting any API work ──
+    if (!connectionMonitor.connected) {
+      logger.info('⏸ Kinabase server unreachable — waiting for reconnection…');
+      await connectionMonitor.waitForConnection();
+      if (interrupted) return;
+      logger.info('▶ Connection restored — resuming poll cycle');
     }
 
     isPolling = true;
@@ -256,6 +343,12 @@ const start = async () => {
       }
     } catch (error) {
       recordKinabaseFailure(error);
+
+      // Notify the connection monitor so it switches to recovery mode
+      if (isUpstreamError(error)) {
+        connectionMonitor.reportFailure(error.message);
+      }
+
       logger.error({ err: error }, 'Kinabase bridge poller encountered an error');
     } finally {
       const durationMs = Date.now() - pollStart;
@@ -264,6 +357,9 @@ const start = async () => {
       isPolling = false;
     }
   };
+
+  // Register poll callback so the dashboard can trigger it manually
+  registerPollCallback(poll);
 
   if (runOnce) {
     await poll();
