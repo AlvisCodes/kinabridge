@@ -258,9 +258,10 @@ console.log('\n🌐 3. API Reachability\n');
 
 let apiReachable = false;
 try {
-  const resp = await fetch(config.kinabase.baseUrl, { method: 'GET', headers: { 'ngrok-skip-browser-warning': 'true' }, signal: AbortSignal.timeout(10000) });
+  const url = `${config.kinabase.baseUrl}/version`;
+  const resp = await fetch(url, { method: 'GET', headers: { 'ngrok-skip-browser-warning': 'true' }, signal: AbortSignal.timeout(10000) });
   apiReachable = true;
-  pass('Kinabase API reachable', `${config.kinabase.baseUrl} → HTTP ${resp.status}`);
+  pass('Kinabase API reachable', `${url} → HTTP ${resp.status}`);
 } catch (err) {
   fail('Kinabase API reachable', `${config.kinabase.baseUrl} → ${err.message}`);
 }
@@ -2100,35 +2101,46 @@ console.log('\n🔔 14. Alert System Validation\n');
 console.log('\n🔗 15. Endpoint URL\n');
 
 {
-  const expectedBaseUrl = process.env.KINABASE_BASE_URL || config.kinabase.baseUrl;
+  const normalizeUrl = (value) => String(value || '').trim().replace(/\/+$/, '');
+  const stripApiV1Suffix = (value) => normalizeUrl(value).replace(/\/api\/v1$/i, '');
 
-  // 15a. Config has correct URL
-  if (process.env.KINABASE_BASE_URL) {
-    if (config.kinabase.baseUrl === process.env.KINABASE_BASE_URL) {
+  const expectedApiOrigin = process.env.KINABASE_API_BASE_URL
+    ? stripApiV1Suffix(process.env.KINABASE_API_BASE_URL)
+    : stripApiV1Suffix(process.env.KINABASE_BASE_URL || config.kinabase.baseUrl);
+
+  const expectedBaseUrl = `${expectedApiOrigin}/api/v1`;
+
+  // 15a. Config has correct origin + API v1 base
+  if (process.env.KINABASE_API_BASE_URL) {
+    if (config.kinabase.apiOrigin === expectedApiOrigin) {
+      pass('config.kinabase.apiOrigin', config.kinabase.apiOrigin);
+    } else {
+      fail('config.kinabase.apiOrigin', `expected ${expectedApiOrigin}, got ${config.kinabase.apiOrigin}`);
+    }
+    if (config.kinabase.baseUrl === expectedBaseUrl) {
       pass('config.kinabase.baseUrl', config.kinabase.baseUrl);
     } else {
-      fail(
-        'config.kinabase.baseUrl',
-        `expected ${process.env.KINABASE_BASE_URL}, got ${config.kinabase.baseUrl}`
-      );
+      fail('config.kinabase.baseUrl', `expected ${expectedBaseUrl}, got ${config.kinabase.baseUrl}`);
     }
+  } else if (process.env.KINABASE_BASE_URL) {
+    pass('config.kinabase.baseUrl (legacy)', config.kinabase.baseUrl);
   } else {
-    pass('config.kinabase.baseUrl', config.kinabase.baseUrl);
+    pass('config.kinabase.baseUrl (default)', config.kinabase.baseUrl);
   }
 
-  // 15b. update-pi.sh has correct URL
+  // 15b. update-pi.sh has Kinabase origin
   const fs = await import('fs');
   try {
     const script = fs.readFileSync('./update-pi.sh', 'utf-8');
-    const match = script.match(/^KINABASE_BASE_URL=(.+)$/m);
+    const match = script.match(/^KINABASE_API_BASE_URL=(.+)$/m);
     if (!match) {
-      fail('update-pi.sh endpoint', 'missing KINABASE_BASE_URL line');
-    } else if (match[1].trim() === expectedBaseUrl) {
-      pass('update-pi.sh endpoint', `KINABASE_BASE_URL=${match[1].trim()}`);
+      fail('update-pi.sh endpoint', 'missing KINABASE_API_BASE_URL line');
+    } else if (stripApiV1Suffix(match[1].trim()) === expectedApiOrigin) {
+      pass('update-pi.sh endpoint', `KINABASE_API_BASE_URL=${match[1].trim()}`);
     } else {
       fail(
         'update-pi.sh endpoint',
-        `expected ${expectedBaseUrl}, got ${match[1].trim()}`
+        `expected ${expectedApiOrigin}, got ${match[1].trim()}`
       );
     }
   } catch (err) {
@@ -2137,9 +2149,9 @@ console.log('\n🔗 15. Endpoint URL\n');
 
   // 15c. URL format is valid
   try {
-    const url = new URL(expectedBaseUrl);
-    if (url.protocol === 'https:' && url.pathname === '/api/v1') {
-      pass('URL format', `protocol=${url.protocol}, path=${url.pathname}`);
+    const url = new URL(expectedApiOrigin);
+    if ((url.protocol === 'https:' || url.protocol === 'http:') && (url.pathname === '' || url.pathname === '/')) {
+      pass('URL format', `protocol=${url.protocol}, origin=${expectedApiOrigin}`);
     } else {
       fail('URL format', `unexpected: protocol=${url.protocol}, path=${url.pathname}`);
     }

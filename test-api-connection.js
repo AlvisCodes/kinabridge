@@ -77,7 +77,7 @@ try {
     console.log('   - Make sure these match!');
     console.log();
     console.log('2. Token was generated for a different API version');
-    console.log('   - Try changing KINABASE_BASE_URL in .env');
+    console.log('   - Try changing KINABASE_API_BASE_URL in .env (preferred), or KINABASE_BASE_URL (legacy)');
     console.log();
     console.log('3. Token has been revoked or invalidated');
     console.log('   - Generate a new token with: ./generate-token.sh');

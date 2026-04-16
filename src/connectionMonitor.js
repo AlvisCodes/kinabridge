@@ -109,7 +109,8 @@ class ConnectionMonitor extends EventEmitter {
     this.#lastCheckAt = new Date().toISOString();
 
     try {
-      const response = await fetch(this.#baseUrl, {
+      const healthUrl = `${this.#baseUrl}/version`;
+      const response = await fetch(healthUrl, {
         method: 'GET',
         headers: { 'ngrok-skip-browser-warning': 'true' },
         signal: AbortSignal.timeout(HEALTH_CHECK_TIMEOUT_MS),

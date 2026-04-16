@@ -1,5 +1,6 @@
 import process from 'process';
 import { exec } from 'child_process';
+import fetch from 'node-fetch';
 import config from './config.js';
 import logger from './logger.js';
 import { loadState, setLastTimestamp, setBridgeEnabled } from './stateStore.js';
@@ -201,6 +202,27 @@ const start = async () => {
     logger.info({ records: records.length }, `✓ InfluxDB OK — ${records.length} record(s) in last 5 min`);
   } catch (error) {
     logger.warn({ err: error }, '⚠ InfluxDB self-test failed — will retry on first poll cycle');
+  }
+
+  try {
+    const versionUrl = `${config.kinabase.apiOrigin}/api/v1/version`;
+    const resp = await fetch(versionUrl, {
+      method: 'GET',
+      headers: { 'ngrok-skip-browser-warning': 'true' },
+      signal: AbortSignal.timeout(10_000),
+    });
+
+    if (resp.ok) {
+      logger.info({ url: versionUrl }, '✓ Kinabase version endpoint OK');
+    } else {
+      const body = await resp.text();
+      logger.warn(
+        { url: versionUrl, status: resp.status, body: body.substring(0, 2000) },
+        '⚠ Kinabase version check failed'
+      );
+    }
+  } catch (error) {
+    logger.warn({ err: error }, '⚠ Kinabase version check failed');
   }
 
   try {

@@ -2,6 +2,12 @@ import { config as loadEnv } from 'dotenv';
 
 loadEnv();
 
+const normalizeUrl = (value) => value.trim().replace(/\/+$/, '');
+
+const stripApiV1Suffix = (value) => normalizeUrl(value).replace(/\/api\/v1$/i, '');
+
+const buildApiV1BaseUrlFromOrigin = (origin) => `${stripApiV1Suffix(origin)}/api/v1`;
+
 const requiredEnv = (name) => {
   const value = process.env[name];
   if (!value) {
@@ -35,8 +41,21 @@ const influx = {
   token: requiredEnv('INFLUX_READ_TOKEN'),
 };
 
+const defaultKinabaseBaseUrl = 'https://1ce1-46-17-166-115.ngrok-free.app/api/v1';
+
+const kinabaseApiOrigin = process.env.KINABASE_API_BASE_URL
+  ? stripApiV1Suffix(process.env.KINABASE_API_BASE_URL)
+  : stripApiV1Suffix(process.env.KINABASE_BASE_URL || defaultKinabaseBaseUrl);
+
+const kinabaseBaseUrl = process.env.KINABASE_API_BASE_URL
+  ? buildApiV1BaseUrlFromOrigin(process.env.KINABASE_API_BASE_URL)
+  : normalizeUrl(process.env.KINABASE_BASE_URL || defaultKinabaseBaseUrl);
+
 const kinabase = {
-  baseUrl: process.env.KINABASE_BASE_URL || 'https://1ce1-46-17-166-115.ngrok-free.app/api/v1',
+  // New preferred env var: origin only (no /api/v1) — Kinabridge appends /api/v1 internally.
+  apiOrigin: kinabaseApiOrigin,
+  // Back-compat: this remains the API v1 base URL used by all internal API calls.
+  baseUrl: kinabaseBaseUrl,
   collection: requiredEnv('KINABASE_COLLECTION'),
   devicesCollection: process.env.KINABASE_DEVICES_COLLECTION || '1abece96-c3b3-4423-ad58-346637a0ca02',
   apiKey: process.env.KINABASE_API_KEY,

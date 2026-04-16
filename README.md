@@ -32,7 +32,11 @@ INFLUX_BUCKET=shoestring_data_bucket
 INFLUX_READ_TOKEN=your_influx_token
 
 # Kinabase Configuration (Use API Key/Secret for auto-refresh)
-KINABASE_BASE_URL=https://smooth-liger-quietly.ngrok-free.app/api/v1
+# Kinabase API origin (no /api/v1 — Kinabridge appends /api/v1 internally)
+# LAN (Raspberry Pi on same network):
+# KINABASE_API_BASE_URL=http://10.10.11.19:5272
+# Public via ngrok:
+KINABASE_API_BASE_URL=https://0458-46-17-166-115.ngrok-free.app
 KINABASE_COLLECTION=584f2727-8b0b-4abd-8bad-e08d767e9527
 KINABASE_DEVICES_COLLECTION=1abece96-c3b3-4423-ad58-346637a0ca02
 KINABASE_API_KEY=your_api_key
