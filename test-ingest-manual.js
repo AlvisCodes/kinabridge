@@ -36,7 +36,6 @@ const ingestPayload = {
         temperatureC: 296.5,
         humidity: 45.2,
         pressure: 1013.0,
-        lastReadingAt: now,
       },
     }],
   }],

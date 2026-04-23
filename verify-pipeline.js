@@ -53,7 +53,6 @@ if (transformed.length === 1 && transformed[0].data.reading_id === 'Environmenta
 console.log('\n3. Create record (first bridge run)');
 const createData = {
   ...transformed[0].data,
-  lastReadingAt: new Date().toISOString()
 };
 let recordId;
 try {
@@ -96,7 +95,6 @@ try {
     method: 'PATCH', headers: h,
     body: JSON.stringify({ data: {
       temperatureC: 23.1, humidity: 52.7, pressure: 1014.8,
-      lastReadingAt: new Date().toISOString()
     }})
   });
   if (resp.ok) {

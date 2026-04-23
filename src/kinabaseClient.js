@@ -119,7 +119,7 @@ class KinabaseClient {
         } else {
           // Create new record with all fields + device link
           logger.info({ readingId }, 'No existing record — creating new one');
-          const createData = { ...record.data, lastReadingAt: new Date().toISOString() };
+          const createData = { ...record.data };
           const deviceId = getDeviceId();
           if (deviceId) {
             createData.device = { id: deviceId };
@@ -163,7 +163,7 @@ class KinabaseClient {
 
     const ingestRecords = batch.map(({ kinabaseId, record }) => {
       const d = record.data;
-      const data = { lastReadingAt: now };
+      const data = {};
 
       if (d.temperatureC != null) data.temperatureC = d.temperatureC;
       if (d.humidity != null) data.humidity = d.humidity;

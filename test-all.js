@@ -446,7 +446,6 @@ if (collectionAccessible && token) {
     temperatureC: 22.4,
     humidity: 55.1,
     pressure: 1013.25,
-    lastReadingAt: new Date().toISOString(),
   };
 
   try {
@@ -485,7 +484,6 @@ if (collectionAccessible && token) {
                 temperatureC: 33.3,
                 humidity: 66.6,
                 pressure: 1020.5,
-                lastReadingAt: ingestTimestamp,
               },
             },
           ],
@@ -602,7 +600,7 @@ if (collectionAccessible && token) {
     }
 
     // 7e-a. Create record via API with real data
-    const createPayload = { ...realData, lastReadingAt: new Date().toISOString() };
+    const createPayload = { ...realData };
     try {
       const resp = await fetch(collectionBase, {
         method: 'POST',
@@ -626,7 +624,7 @@ if (collectionAccessible && token) {
     // 7e-b. Ingest real data via telemetry endpoint
     if (realTestRecordId) {
       const ingestTs = new Date().toISOString();
-      const ingestData = { ...realData, lastReadingAt: ingestTs };
+      const ingestData = { ...realData };
       delete ingestData.reading_id; // not sent in ingest payload
 
       const ingestPayload = {
@@ -740,7 +738,7 @@ if (collectionAccessible && token) {
     const resp = await fetch(collectionBase, {
       method: 'POST',
       headers: authHeaders,
-      body: JSON.stringify({ data: { reading_id: `_INGEST_VALIDATE_${Date.now()}`, temperatureC: 290, humidity: 50, pressure: 1013, lastReadingAt: new Date().toISOString() } }),
+      body: JSON.stringify({ data: { reading_id: `_INGEST_VALIDATE_${Date.now()}`, temperatureC: 290, humidity: 50, pressure: 1013 } }),
       signal: AbortSignal.timeout(10000),
     });
     if (resp.ok) {
@@ -807,7 +805,7 @@ if (collectionAccessible && token) {
       if (!tData) throw new Error('no transform output');
 
       // Build ingest payload using EXACTLY the fields transform produces (minus reading_id)
-      const ingestData = { ...tData, lastReadingAt: new Date().toISOString() };
+      const ingestData = { ...tData };
       delete ingestData.reading_id;
 
       const fullPayload = {
