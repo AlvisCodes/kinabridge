@@ -3,7 +3,7 @@ import config from './config.js';
 import logger from './logger.js';
 
 const MEASUREMENT = 'humidity_sensors';
-const FIELD_WHITELIST = new Set(['temperature', 'humidity', 'pressure', 'battery_level', 'signal_strength', 'voltage', 'current_draw', 'power_consumption', 'energy_used', 'data_transmitted', 'light_level', 'atmospheric_pressure']);
+const FIELD_WHITELIST = new Set(['temperature', 'humidity', 'pressure', 'atmospheric_pressure']);
 const SOURCE_NAME = 'shoestring-humidity-monitoring';
 const QUERY_TIMEOUT_MS = 30_000;
 

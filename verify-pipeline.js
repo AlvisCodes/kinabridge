@@ -39,7 +39,7 @@ const fakeInflux = [{
   machine: 'EnvironmentalSensor',
   timestamp: new Date().toISOString(),
   source: 'shoestring-humidity-monitoring',
-  fields: { temperature: 21.5, humidity: 48.3, pressure: 1015.2, signal_strength: -38 }
+  fields: { temperature: 21.5, humidity: 48.3, pressure: 1015.2 }
 }];
 const transformed = toKinabaseRecords(fakeInflux);
 if (transformed.length === 1 && transformed[0].data.reading_id === 'EnvironmentalSensor') {
@@ -96,7 +96,7 @@ try {
     method: 'PATCH', headers: h,
     body: JSON.stringify({ data: {
       temperatureC: 23.1, humidity: 52.7, pressure: 1014.8,
-      signal_strength: -41, lastReadingAt: new Date().toISOString()
+      lastReadingAt: new Date().toISOString()
     }})
   });
   if (resp.ok) {
@@ -115,7 +115,7 @@ try {
   const body = await resp.json();
   const d = body.data;
   if (d.temperatureC === 23.1 && d.humidity === 52.7) {
-    ok('GET verify', `temp=${d.temperatureC} hum=${d.humidity} pres=${d.pressure} signal=${d.signal_strength}`);
+    ok('GET verify', `temp=${d.temperatureC} hum=${d.humidity} pres=${d.pressure}`);
   } else {
     bad('GET verify', `unexpected values: ${JSON.stringify(d)}`);
   }

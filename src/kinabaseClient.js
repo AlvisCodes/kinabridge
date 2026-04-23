@@ -168,14 +168,6 @@ class KinabaseClient {
       if (d.temperatureC != null) data.temperatureC = d.temperatureC;
       if (d.humidity != null) data.humidity = d.humidity;
       if (d.pressure != null) data.pressure = d.pressure;
-      if (d.battery_level != null) data.battery_level = d.battery_level;
-      if (d.signal_strength != null) data.signal_strength = d.signal_strength;
-      if (d.voltage != null) data.voltage = d.voltage;
-      if (d.current_draw != null) data.current_draw = d.current_draw;
-      if (d.power_consumption != null) data.power_consumption = d.power_consumption;
-      if (d.energy_used != null) data.energy_used = d.energy_used;
-      if (d.data_transmitted != null) data.data_transmitted = d.data_transmitted;
-      if (d.light_level != null) data.light_level = d.light_level;
 
       logger.debug(
         { kinabaseId, fields: Object.keys(data), fieldCount: Object.keys(data).length },

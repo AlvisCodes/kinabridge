@@ -15,7 +15,7 @@ import fetch from 'node-fetch';
 import { InfluxDB } from '@influxdata/influxdb-client';
 import config from './src/config.js';
 import { createTokenProvider } from './src/kinabaseAuth.js';
-import { toKinabaseRecords, DEFAULT_RANGES } from './src/transform.js';
+import { toKinabaseRecords } from './src/transform.js';
 
 const PI_HOST = process.env.PI_HOST || 'raspberrypi.local';
 const PI_PORT = process.env.PI_PORT || 22;
@@ -98,14 +98,6 @@ const sampleInfluxRecords = [
       temperature: 22.4,
       humidity: 55.1,
       pressure: 1013.25,
-      battery_level: 87,
-      signal_strength: -42,
-      voltage: 3.28,
-      current_draw: 120.5,
-      power_consumption: 0.39,
-      energy_used: 1.234,
-      data_transmitted: 56.78,
-      light_level: 72.3,
     },
   },
 ];
@@ -125,14 +117,6 @@ if (transformed.length > 0) {
     ['temperatureC', Math.abs(d.temperatureC - 295.55) < 0.01],
     ['humidity', d.humidity === 55.1],
     ['pressure', d.pressure === 1013.25],
-    ['battery_level', d.battery_level === 87],
-    ['signal_strength', d.signal_strength === -42],
-    ['voltage', d.voltage === 3.28],
-    ['current_draw', d.current_draw === 120.5],
-    ['power_consumption', d.power_consumption === 0.39],
-    ['energy_used', d.energy_used === 1.234],
-    ['data_transmitted', d.data_transmitted === 56.78],
-    ['light_level', d.light_level === 72.3],
   ];
   for (const [field, ok] of checks) {
     if (ok) pass(`record.${field}`, JSON.stringify(d[field]));
@@ -143,9 +127,9 @@ if (transformed.length > 0) {
 }
 
 // ─────────────────────────────────────────────
-// 2b. Fake defaults for missing InfluxDB fields
+// 2b. Sparse InfluxDB fields → only real fields present
 // ─────────────────────────────────────────────
-console.log('\n🎭 2b. Fake Defaults (missing InfluxDB fields)\n');
+console.log('\n🧩 2b. Sparse Real Fields Only\n');
 
 // Simulate what the Pi actually sends: only temperature, humidity, pressure
 const sparseInfluxRecords = [
@@ -172,7 +156,7 @@ if (sparseTransformed.length === 1) {
 if (sparseTransformed.length > 0) {
   const s = sparseTransformed[0].data;
 
-  // Real fields should still be present
+  // Real fields should be present
   const realChecks = [
     ['reading_id', s.reading_id === 'EnvironmentalSensor'],
     ['temperatureC', Math.abs(s.temperatureC - 294.15) < 0.01],
@@ -184,26 +168,17 @@ if (sparseTransformed.length > 0) {
     else fail(`sparse.${field}`, `unexpected: ${JSON.stringify(s[field])}`);
   }
 
-  // Fake defaults should fill in missing fields — now randomised within ranges
-  const rangeChecks = [
-    ['battery_level', s.battery_level, DEFAULT_RANGES.battery_level],
-    ['signal_strength', s.signal_strength, DEFAULT_RANGES.signal_strength],
-    ['voltage', s.voltage, DEFAULT_RANGES.voltage],
-    ['current_draw', s.current_draw, DEFAULT_RANGES.current_draw],
-    ['power_consumption', s.power_consumption, DEFAULT_RANGES.power_consumption],
-    ['energy_used', s.energy_used, DEFAULT_RANGES.energy_used],
-    ['data_transmitted', s.data_transmitted, DEFAULT_RANGES.data_transmitted],
-    ['light_level', s.light_level, DEFAULT_RANGES.light_level],
-  ];
-  for (const [field, val, range] of rangeChecks) {
-    if (val >= range.min && val <= range.max) {
-      pass(`sparse.${field} (random default)`, `${val} (in range ${range.min}–${range.max})`);
-    } else {
-      fail(`sparse.${field} (random default)`, `${val} outside range ${range.min}–${range.max}`);
-    }
+  // Only reading_id + temperatureC + humidity + pressure should be output
+  const expectedKeys = ['reading_id', 'temperatureC', 'humidity', 'pressure'];
+  const actualKeys = Object.keys(s);
+  const extras = actualKeys.filter(k => !expectedKeys.includes(k));
+  if (extras.length === 0 && expectedKeys.every(k => actualKeys.includes(k))) {
+    pass('Only real fields emitted', actualKeys.join(', '));
+  } else {
+    fail('Only real fields emitted', `extras=${extras.join(', ') || 'none'}, got=${actualKeys.join(', ')}`);
   }
 } else {
-  fail('Sparse defaults', 'no records in transform output');
+  fail('Sparse transform', 'no records in transform output');
 }
 
 // ─────────────────────────────────────────────
@@ -231,7 +206,7 @@ if (kpaRecords.length === 1) {
   fail('kPa guard', 'no records');
 }
 
-// Test pressure default when no pressure at all
+// Test that pressure is omitted (not fabricated) when no pressure data is present
 const noPressureRecords = toKinabaseRecords([{
   machine: 'EnvironmentalSensor',
   timestamp: new Date().toISOString(),
@@ -241,14 +216,13 @@ const noPressureRecords = toKinabaseRecords([{
 
 if (noPressureRecords.length === 1) {
   const n = noPressureRecords[0].data;
-  const pr = DEFAULT_RANGES.pressure;
-  if (n.pressure >= pr.min && n.pressure <= pr.max) {
-    pass('pressure default', `${n.pressure} hPa (random in ${pr.min}–${pr.max})`);
+  if (n.pressure == null) {
+    pass('pressure omitted when missing', 'not fabricated');
   } else {
-    fail('pressure default', `${n.pressure} outside range ${pr.min}–${pr.max}`);
+    fail('pressure omitted when missing', `got ${n.pressure} (should be null/absent)`);
   }
 } else {
-  fail('pressure default', 'no records');
+  fail('pressure missing test', 'no records');
 }
 
 // ─────────────────────────────────────────────
@@ -471,15 +445,7 @@ if (collectionAccessible && token) {
     reading_id: `_TEST_${Date.now()}`,
     temperatureC: 22.4,
     humidity: 55.1,
-    battery_level: 100,
-    signal_strength: -10,
     pressure: 1013.25,
-    voltage: 3.3,
-    current_draw: 100.0,
-    power_consumption: 0.33,
-    energy_used: 0.5,
-    data_transmitted: 10.0,
-    light_level: 50.0,
     lastReadingAt: new Date().toISOString(),
   };
 
@@ -519,14 +485,6 @@ if (collectionAccessible && token) {
                 temperatureC: 33.3,
                 humidity: 66.6,
                 pressure: 1020.5,
-                battery_level: 50,
-                signal_strength: -55,
-                voltage: 3.1,
-                current_draw: 150.0,
-                power_consumption: 0.47,
-                energy_used: 1.0,
-                data_transmitted: 25.0,
-                light_level: 80.0,
                 lastReadingAt: ingestTimestamp,
               },
             },
@@ -609,46 +567,42 @@ if (collectionAccessible && token) {
 }
 
 // ─────────────────────────────────────────────
-// 7e. Fake-defaults end-to-end — sparse InfluxDB → transform → API
+// 7e. Real-fields end-to-end — sparse InfluxDB → transform → API
 // ─────────────────────────────────────────────
-console.log('\n🎭 7e. Fake-Defaults End-to-End (sparse InfluxDB → API)\n');
+console.log('\n🧩 7e. Real-Fields End-to-End (sparse InfluxDB → API)\n');
 
-let fakeTestRecordId = null;
+let realTestRecordId = null;
 if (collectionAccessible && token) {
   const collectionBase = `${config.kinabase.baseUrl}/collections/${config.kinabase.collection}`;
 
   // Simulate InfluxDB only sending temperature, humidity, pressure
   const sparseInflux = [{
-    machine: `_FAKE_TEST_${Date.now()}`,
+    machine: `_REAL_TEST_${Date.now()}`,
     timestamp: new Date().toISOString(),
     source: 'shoestring-humidity-monitoring',
     fields: { temperature: 23.5, humidity: 48.0, pressure: 1012.0 },
   }];
 
-  const fakeTransformed = toKinabaseRecords(sparseInflux);
-  const fakeData = fakeTransformed[0]?.data;
+  const realTransformed = toKinabaseRecords(sparseInflux);
+  const realData = realTransformed[0]?.data;
 
-  if (!fakeData) {
+  if (!realData) {
     fail('Transform sparse record', 'no output');
   } else {
-    // Verify transform filled all 12 writable fields
-    const expectedFields = [
-      'reading_id', 'temperatureC', 'humidity',
-      'pressure', 'battery_level', 'signal_strength',
-      'voltage', 'current_draw', 'power_consumption',
-      'energy_used', 'data_transmitted', 'light_level',
-    ];
-    const presentFields = expectedFields.filter(f => fakeData[f] != null);
-    const missingFields = expectedFields.filter(f => fakeData[f] == null);
+    // Verify transform produced only the real fields
+    const expectedFields = ['reading_id', 'temperatureC', 'humidity', 'pressure'];
+    const presentFields = expectedFields.filter(f => realData[f] != null);
+    const missingFields = expectedFields.filter(f => realData[f] == null);
+    const extraFields = Object.keys(realData).filter(f => !expectedFields.includes(f));
 
-    if (missingFields.length === 0) {
-      pass('All 12 fields populated', presentFields.join(', '));
+    if (missingFields.length === 0 && extraFields.length === 0) {
+      pass('Only real fields populated', presentFields.join(', '));
     } else {
-      fail('Missing fields after transform', missingFields.join(', '));
+      fail('Transform fields', `missing=${missingFields.join(', ') || 'none'}, extras=${extraFields.join(', ') || 'none'}`);
     }
 
-    // 7e-a. Create record via API with fake-filled data
-    const createPayload = { ...fakeData, lastReadingAt: new Date().toISOString() };
+    // 7e-a. Create record via API with real data
+    const createPayload = { ...realData, lastReadingAt: new Date().toISOString() };
     try {
       const resp = await fetch(collectionBase, {
         method: 'POST',
@@ -659,26 +613,26 @@ if (collectionAccessible && token) {
 
       if (resp.ok) {
         const body = await resp.json();
-        fakeTestRecordId = body.id || body.data?.id;
-        pass('POST create with fakes', `id=${fakeTestRecordId} (all 13 fields sent)`);
+        realTestRecordId = body.id || body.data?.id;
+        pass('POST create with real fields', `id=${realTestRecordId} (${Object.keys(createPayload).length} fields sent)`);
       } else {
         const text = await resp.text();
-        fail('POST create with fakes', `HTTP ${resp.status}: ${text.substring(0, 200)}`);
+        fail('POST create with real fields', `HTTP ${resp.status}: ${text.substring(0, 200)}`);
       }
     } catch (err) {
-      fail('POST create with fakes', err.message);
+      fail('POST create with real fields', err.message);
     }
 
-    // 7e-b. Ingest fake-filled data via telemetry endpoint
-    if (fakeTestRecordId) {
+    // 7e-b. Ingest real data via telemetry endpoint
+    if (realTestRecordId) {
       const ingestTs = new Date().toISOString();
-      const ingestData = { ...fakeData, lastReadingAt: ingestTs };
+      const ingestData = { ...realData, lastReadingAt: ingestTs };
       delete ingestData.reading_id; // not sent in ingest payload
 
       const ingestPayload = {
         mode: 'FUTURE_FACING',
         records: [{
-          id: String(fakeTestRecordId),
+          id: String(realTestRecordId),
           changes: [{ timestamp: ingestTs, data: ingestData }],
         }],
       };
@@ -695,21 +649,21 @@ if (collectionAccessible && token) {
           const body = await resp.json();
           if (body.failedRecords > 0) {
             const errors = (body.errors || []).map(e => `${e.error} (${e.errorCode})`).join('; ');
-            fail('POST ingest with fakes', `HTTP 200 but ${body.failedRecords} record(s) rejected: ${errors}`);
+            fail('POST ingest with real fields', `HTTP 200 but ${body.failedRecords} record(s) rejected: ${errors}`);
           } else {
-            pass('POST ingest with fakes', `processed=${body.processedRecords}/${body.totalRecords} for record ${fakeTestRecordId}`);
+            pass('POST ingest with real fields', `processed=${body.processedRecords}/${body.totalRecords} for record ${realTestRecordId}`);
           }
         } else {
           const text = await resp.text();
-          fail('POST ingest with fakes', `HTTP ${resp.status}: ${text.substring(0, 200)}`);
+          fail('POST ingest with real fields', `HTTP ${resp.status}: ${text.substring(0, 200)}`);
         }
       } catch (err) {
-        fail('POST ingest with fakes', err.message);
+        fail('POST ingest with real fields', err.message);
       }
 
-      // 7e-c. Verify the record has all fields stored
+      // 7e-c. Verify the record has the real fields stored
       try {
-        const resp = await fetch(`${collectionBase}/${fakeTestRecordId}`, {
+        const resp = await fetch(`${collectionBase}/${realTestRecordId}`, {
           headers: authHeaders,
           signal: AbortSignal.timeout(10000),
         });
@@ -718,17 +672,12 @@ if (collectionAccessible && token) {
           const body = await resp.json();
           const stored = body.data || body;
           const verifyFields = {
-            temperatureC:          [v => Math.abs(v - 296.65) < 0.01, '~296.65 K'],
-            humidity:              [v => v === 48.0, '48.0'],
-            battery_level:         [v => v >= DEFAULT_RANGES.battery_level.min && v <= DEFAULT_RANGES.battery_level.max, `${DEFAULT_RANGES.battery_level.min}–${DEFAULT_RANGES.battery_level.max} (random)`],
-            signal_strength:       [v => v >= DEFAULT_RANGES.signal_strength.min && v <= DEFAULT_RANGES.signal_strength.max, `${DEFAULT_RANGES.signal_strength.min}–${DEFAULT_RANGES.signal_strength.max} (random)`],
+            temperatureC: [v => Math.abs(v - 296.65) < 0.01, '~296.65 K'],
+            humidity:     [v => v === 48.0, '48.0'],
           };
 
-          // Metric-type fields may not appear in GET responses (stored in telemetry store)
-          const metricFields = [
-            'pressure', 'voltage', 'current_draw', 'power_consumption',
-            'energy_used', 'data_transmitted', 'light_level',
-          ];
+          // pressure is a metric-type field and may not appear in GET responses
+          const metricFields = ['pressure'];
 
           for (const [field, [check, label]] of Object.entries(verifyFields)) {
             const val = Number(stored[field]);
@@ -744,37 +693,36 @@ if (collectionAccessible && token) {
             if (val != null) {
               pass(`API stored ${field}`, `${val}`);
             } else {
-              // Metric fields are written via ingest but may not appear in GET
               pass(`API stored ${field}`, 'written via ingest (not in GET response — metric type)');
             }
           }
         } else {
-          fail('GET verify fakes', `HTTP ${resp.status}`);
+          fail('GET verify real fields', `HTTP ${resp.status}`);
         }
       } catch (err) {
-        fail('GET verify fakes', err.message);
+        fail('GET verify real fields', err.message);
       }
 
       // 7e-d. Cleanup
       try {
-        const resp = await fetch(`${collectionBase}/${fakeTestRecordId}`, {
+        const resp = await fetch(`${collectionBase}/${realTestRecordId}`, {
           method: 'DELETE',
           headers: authHeaders,
           signal: AbortSignal.timeout(10000),
         });
 
         if (resp.ok || resp.status === 204) {
-          pass('DELETE cleanup fakes', `removed ${fakeTestRecordId}`);
+          pass('DELETE cleanup real-fields test', `removed ${realTestRecordId}`);
         } else {
-          fail('DELETE cleanup fakes', `HTTP ${resp.status}`);
+          fail('DELETE cleanup real-fields test', `HTTP ${resp.status}`);
         }
       } catch (err) {
-        fail('DELETE cleanup fakes', err.message);
+        fail('DELETE cleanup real-fields test', err.message);
       }
     }
   }
 } else {
-  skip('Fake-defaults E2E', 'collection not accessible');
+  skip('Real-fields E2E', 'collection not accessible');
 }
 
 // ─────────────────────────────────────────────
@@ -792,7 +740,7 @@ if (collectionAccessible && token) {
     const resp = await fetch(collectionBase, {
       method: 'POST',
       headers: authHeaders,
-      body: JSON.stringify({ data: { reading_id: `_INGEST_VALIDATE_${Date.now()}`, temperatureC: 290, humidity: 50, pressure: 1013, battery_level: 100, signal_strength: -30, lastReadingAt: new Date().toISOString() } }),
+      body: JSON.stringify({ data: { reading_id: `_INGEST_VALIDATE_${Date.now()}`, temperatureC: 290, humidity: 50, pressure: 1013, lastReadingAt: new Date().toISOString() } }),
       signal: AbortSignal.timeout(10000),
     });
     if (resp.ok) {
@@ -904,8 +852,6 @@ console.log('\n🔗 2d. Transform → Kinabase Field Consistency\n');
   // If transform produces anything else, ingest will silently fail with "Unknown fields".
   const KNOWN_KINABASE_FIELDS = new Set([
     'reading_id', 'temperatureC', 'humidity', 'pressure',
-    'battery_level', 'signal_strength', 'voltage', 'current_draw',
-    'power_consumption', 'energy_used', 'data_transmitted', 'light_level',
     'lastReadingAt', 'device', 'deviceName', 'deviceType', 'location',
   ]);
 
@@ -927,7 +873,7 @@ console.log('\n🔗 2d. Transform → Kinabase Field Consistency\n');
     }
 
     // Ensure critical fields are always present
-    const requiredFields = ['reading_id', 'temperatureC', 'humidity', 'pressure', 'battery_level', 'signal_strength'];
+    const requiredFields = ['reading_id', 'temperatureC', 'humidity', 'pressure'];
     const missingRequired = requiredFields.filter(f => !(f in testRecord[0].data));
     if (missingRequired.length === 0) {
       pass('All required fields present', requiredFields.join(', '));
@@ -945,7 +891,7 @@ console.log('\n🔗 2d. Transform → Kinabase Field Consistency\n');
 console.log('\n🧪 2e. Transform Edge Cases\n');
 
 {
-  // Empty fields object — should still produce a record with defaults
+  // Empty fields object — should produce a record with only reading_id
   const emptyFields = toKinabaseRecords([{
     machine: 'EmptyFieldsTest',
     timestamp: new Date().toISOString(),
@@ -954,20 +900,16 @@ console.log('\n🧪 2e. Transform Edge Cases\n');
   }]);
   if (emptyFields.length === 1) {
     const d = emptyFields[0].data;
-    const bOk = d.battery_level >= DEFAULT_RANGES.battery_level.min && d.battery_level <= DEFAULT_RANGES.battery_level.max;
-    const vOk = d.voltage >= DEFAULT_RANGES.voltage.min && d.voltage <= DEFAULT_RANGES.voltage.max;
-    const pOk = d.pressure >= DEFAULT_RANGES.pressure.min && d.pressure <= DEFAULT_RANGES.pressure.max;
-    if (bOk && vOk && pOk) {
-      pass('Empty fields → all defaults', `battery=${d.battery_level}, voltage=${d.voltage}, pressure=${d.pressure}`);
+    // All sensor fields should be absent when InfluxDB returns nothing — no fabrication
+    if (d.temperatureC == null && d.humidity == null && d.pressure == null) {
+      pass('Empty fields → no fabricated values', 'all sensor fields correctly omitted');
     } else {
-      fail('Empty fields → defaults', `battery=${d.battery_level}, voltage=${d.voltage}, pressure=${d.pressure}`);
+      fail('Empty fields → no fabricated values', `temp=${d.temperatureC}, hum=${d.humidity}, pres=${d.pressure}`);
     }
-
-    // Temperature and humidity should be absent (not default-filled)
-    if (d.temperatureC == null && d.humidity == null) {
-      pass('Empty fields → no temp/humidity', 'correctly omitted when not in InfluxDB');
+    if (d.reading_id === 'EmptyFieldsTest') {
+      pass('Empty fields → reading_id present', d.reading_id);
     } else {
-      fail('Empty fields → no temp/humidity', `temp=${d.temperatureC}, hum=${d.humidity}`);
+      fail('Empty fields → reading_id', `got ${d.reading_id}`);
     }
   } else {
     fail('Empty fields transform', 'wrong record count');
@@ -1017,20 +959,19 @@ console.log('\n🧪 2e. Transform Edge Cases\n');
     fail('String numeric parsing', 'wrong record count');
   }
 
-  // NaN / garbage values — should fall back to defaults
+  // NaN / garbage values — should produce null for bad numerics
   const garbageValues = toKinabaseRecords([{
     machine: 'GarbageTest',
     timestamp: new Date().toISOString(),
     source: 'test',
-    fields: { temperature: 'not_a_number', humidity: NaN, battery_level: undefined },
+    fields: { temperature: 'not_a_number', humidity: NaN, pressure: 'oops' },
   }]);
   if (garbageValues.length === 1) {
     const d = garbageValues[0].data;
-    const bOk = d.battery_level >= DEFAULT_RANGES.battery_level.min && d.battery_level <= DEFAULT_RANGES.battery_level.max;
-    if (d.temperatureC == null && d.humidity == null && bOk) {
-      pass('Garbage values → defaults/null', `temp=${d.temperatureC}, hum=${d.humidity}, battery=${d.battery_level}`);
+    if (d.temperatureC == null && d.humidity == null && d.pressure == null) {
+      pass('Garbage values → null', `temp=${d.temperatureC}, hum=${d.humidity}, pres=${d.pressure}`);
     } else {
-      fail('Garbage values', `temp=${d.temperatureC}, hum=${d.humidity}, battery=${d.battery_level}`);
+      fail('Garbage values', `temp=${d.temperatureC}, hum=${d.humidity}, pres=${d.pressure}`);
     }
   } else {
     fail('Garbage values', 'wrong record count');
@@ -1051,132 +992,310 @@ console.log('\n🧪 2e. Transform Edge Cases\n');
 }
 
 // ─────────────────────────────────────────────
-// 2f. Randomised defaults — variation & range tests
+// 2f. No fabricated fields — output contains only real sensor fields
 // ─────────────────────────────────────────────
-console.log('\n🎲 2f. Randomised Default Variation\n');
+console.log('\n🚫 2f. No Fake Fields\n');
 
 {
-  const sparseInput = () => [{
-    machine: 'RandomTest',
+  const forbiddenFields = [
+    'battery_level', 'signal_strength', 'voltage', 'current_draw',
+    'power_consumption', 'energy_used', 'data_transmitted', 'light_level',
+  ];
+
+  // Even when InfluxDB supplies them, transform should ignore them —
+  // the whitelist and transform must only emit real fields.
+  const withFakes = toKinabaseRecords([{
+    machine: 'NoFakesTest',
     timestamp: new Date().toISOString(),
     source: 'test',
-    fields: { temperature: 20.0, humidity: 50.0 },
-  }];
-
-  // Run transform multiple times and check that at least one field varies
-  const ITERATIONS = 20;
-  const allResults = [];
-  for (let i = 0; i < ITERATIONS; i++) {
-    allResults.push(toKinabaseRecords(sparseInput())[0].data);
-  }
-
-  // 2f-a. Values differ across calls (not hardcoded)
-  const fieldsToCheck = Object.keys(DEFAULT_RANGES);
-  let fieldsWithVariation = 0;
-  for (const field of fieldsToCheck) {
-    const uniqueValues = new Set(allResults.map(d => d[field]));
-    if (uniqueValues.size > 1) {
-      fieldsWithVariation++;
-    }
-  }
-  if (fieldsWithVariation >= fieldsToCheck.length - 1) {
-    pass('Defaults vary across calls', `${fieldsWithVariation}/${fieldsToCheck.length} fields produced distinct values over ${ITERATIONS} runs`);
-  } else {
-    fail('Defaults vary across calls', `only ${fieldsWithVariation}/${fieldsToCheck.length} fields varied — values may still be hardcoded`);
-  }
-
-  // 2f-b. Every value is within its declared range
-  let allInRange = true;
-  let outOfRangeDetail = '';
-  for (const result of allResults) {
-    for (const [field, range] of Object.entries(DEFAULT_RANGES)) {
-      const val = result[field];
-      if (val < range.min || val > range.max) {
-        allInRange = false;
-        outOfRangeDetail = `${field}=${val} outside ${range.min}–${range.max}`;
-        break;
-      }
-    }
-    if (!allInRange) break;
-  }
-  if (allInRange) {
-    pass('All random defaults in range', `${ITERATIONS} records × ${fieldsToCheck.length} fields — all within bounds`);
-  } else {
-    fail('Random default out of range', outOfRangeDetail);
-  }
-
-  // 2f-c. Decimal precision matches declared decimals
-  let precisionOk = true;
-  let precisionDetail = '';
-  for (const result of allResults) {
-    for (const [field, range] of Object.entries(DEFAULT_RANGES)) {
-      const val = result[field];
-      const parts = String(val).split('.');
-      const actualDecimals = parts.length > 1 ? parts[1].length : 0;
-      if (actualDecimals > range.decimals) {
-        precisionOk = false;
-        precisionDetail = `${field}=${val} has ${actualDecimals} decimals, expected ≤${range.decimals}`;
-        break;
-      }
-    }
-    if (!precisionOk) break;
-  }
-  if (precisionOk) {
-    pass('Decimal precision correct', `all values respect declared decimals`);
-  } else {
-    fail('Decimal precision', precisionDetail);
-  }
-
-  // 2f-d. Real InfluxDB values override random defaults (not replaced)
-  const withRealData = toKinabaseRecords([{
-    machine: 'OverrideTest',
-    timestamp: new Date().toISOString(),
-    source: 'test',
-    fields: { temperature: 22.0, humidity: 50.0, battery_level: 42, signal_strength: -70, voltage: 3.3 },
+    fields: {
+      temperature: 22.0,
+      humidity: 50.0,
+      pressure: 1013.0,
+      battery_level: 42,
+      signal_strength: -70,
+      voltage: 3.3,
+      current_draw: 120,
+      power_consumption: 0.4,
+      energy_used: 0.01,
+      data_transmitted: 0.1,
+      light_level: 55,
+    },
   }]);
-  if (withRealData.length === 1) {
-    const d = withRealData[0].data;
-    if (d.battery_level === 42 && d.signal_strength === -70 && d.voltage === 3.3) {
-      pass('Real values override defaults', `battery=42, signal=-70, voltage=3.3 (not randomised)`);
+
+  if (withFakes.length === 1) {
+    const d = withFakes[0].data;
+    const leaked = forbiddenFields.filter(f => f in d);
+    if (leaked.length === 0) {
+      pass('Fake fields are stripped', 'output contains no fabricated fields');
     } else {
-      fail('Real values override defaults', `battery=${d.battery_level}, signal=${d.signal_strength}, voltage=${d.voltage}`);
+      fail('Fake fields leaked', leaked.join(', '));
     }
   } else {
-    fail('Override test', 'no transform output');
+    fail('No-fakes transform', 'wrong record count');
+  }
+}
+
+// ─────────────────────────────────────────────
+// 2g. Extended transform edge cases
+// ─────────────────────────────────────────────
+console.log('\n🧩 2g. Extended Transform Edge Cases\n');
+
+{
+  const ts = () => new Date().toISOString();
+
+  // Only temperature
+  const tOnly = toKinabaseRecords([{ machine: 'TOnly', timestamp: ts(), source: 't', fields: { temperature: 15.0 } }]);
+  if (tOnly.length === 1 && Math.abs(tOnly[0].data.temperatureC - 288.15) < 0.001 && tOnly[0].data.humidity == null && tOnly[0].data.pressure == null) {
+    pass('Only temperature', `T=${tOnly[0].data.temperatureC} K, others omitted`);
+  } else {
+    fail('Only temperature', JSON.stringify(tOnly[0]?.data));
   }
 
-  // 2f-e. Each call produces independent random values (no shared state between records)
-  const multiDevice = toKinabaseRecords([
-    { machine: 'DeviceA', timestamp: new Date().toISOString(), source: 'test', fields: { temperature: 20.0 } },
-    { machine: 'DeviceB', timestamp: new Date().toISOString(), source: 'test', fields: { temperature: 21.0 } },
-    { machine: 'DeviceC', timestamp: new Date().toISOString(), source: 'test', fields: { temperature: 22.0 } },
+  // Only humidity
+  const hOnly = toKinabaseRecords([{ machine: 'HOnly', timestamp: ts(), source: 't', fields: { humidity: 42.5 } }]);
+  if (hOnly.length === 1 && hOnly[0].data.humidity === 42.5 && hOnly[0].data.temperatureC == null && hOnly[0].data.pressure == null) {
+    pass('Only humidity', `H=${hOnly[0].data.humidity}, others omitted`);
+  } else {
+    fail('Only humidity', JSON.stringify(hOnly[0]?.data));
+  }
+
+  // Only pressure
+  const pOnly = toKinabaseRecords([{ machine: 'POnly', timestamp: ts(), source: 't', fields: { pressure: 1005.5 } }]);
+  if (pOnly.length === 1 && pOnly[0].data.pressure === 1005.5 && pOnly[0].data.temperatureC == null && pOnly[0].data.humidity == null) {
+    pass('Only pressure', `P=${pOnly[0].data.pressure} hPa, others omitted`);
+  } else {
+    fail('Only pressure', JSON.stringify(pOnly[0]?.data));
+  }
+
+  // atmospheric_pressure takes precedence over pressure (hPa)
+  const atmHpa = toKinabaseRecords([{ machine: 'AtmHpa', timestamp: ts(), source: 't', fields: { pressure: 999.0, atmospheric_pressure: 1020.0 } }]);
+  if (atmHpa[0]?.data.pressure === 1020.0) {
+    pass('atmospheric_pressure precedence (hPa)', `got ${atmHpa[0].data.pressure}`);
+  } else {
+    fail('atmospheric_pressure precedence (hPa)', `expected 1020, got ${atmHpa[0]?.data.pressure}`);
+  }
+
+  // atmospheric_pressure in kPa gets converted and wins over pressure
+  const atmKpa = toKinabaseRecords([{ machine: 'AtmKpa', timestamp: ts(), source: 't', fields: { pressure: 999.0, atmospheric_pressure: 101.5 } }]);
+  if (atmKpa[0]?.data.pressure && Math.abs(atmKpa[0].data.pressure - 10150) < 0.001) {
+    pass('atmospheric_pressure precedence (kPa→hPa)', `${atmKpa[0].data.pressure} hPa from 101.5 kPa`);
+  } else {
+    fail('atmospheric_pressure precedence (kPa→hPa)', `got ${atmKpa[0]?.data.pressure}`);
+  }
+
+  // Pressure kPa boundary — value exactly at 200 stays as hPa (guard is <200)
+  const pBoundary = toKinabaseRecords([{ machine: 'PBoundary', timestamp: ts(), source: 't', fields: { pressure: 200 } }]);
+  if (pBoundary[0]?.data.pressure === 200) {
+    pass('Pressure boundary (200)', '200 treated as hPa (not converted)');
+  } else {
+    fail('Pressure boundary (200)', `got ${pBoundary[0]?.data.pressure}`);
+  }
+
+  // Pressure value just below 200 triggers kPa conversion
+  const pJustBelow = toKinabaseRecords([{ machine: 'PJustBelow', timestamp: ts(), source: 't', fields: { pressure: 199.9 } }]);
+  if (pJustBelow[0]?.data.pressure && Math.abs(pJustBelow[0].data.pressure - 19990) < 0.001) {
+    pass('Pressure just-below-200 → kPa conversion', `${pJustBelow[0].data.pressure} hPa`);
+  } else {
+    fail('Pressure just-below-200', `got ${pJustBelow[0]?.data.pressure}`);
+  }
+
+  // Negative Celsius → Kelvin
+  const negTemp = toKinabaseRecords([{ machine: 'NegTemp', timestamp: ts(), source: 't', fields: { temperature: -40.0 } }]);
+  if (negTemp[0]?.data.temperatureC && Math.abs(negTemp[0].data.temperatureC - 233.15) < 0.001) {
+    pass('Negative Celsius → Kelvin', `-40°C → ${negTemp[0].data.temperatureC} K`);
+  } else {
+    fail('Negative Celsius → Kelvin', `got ${negTemp[0]?.data.temperatureC}`);
+  }
+
+  // Multi-record — every output must contain only real fields
+  const multi = toKinabaseRecords([
+    { machine: 'M1', timestamp: ts(), source: 't', fields: { temperature: 20, battery_level: 10, voltage: 99 } },
+    { machine: 'M2', timestamp: ts(), source: 't', fields: { humidity: 55, current_draw: 888 } },
+    { machine: 'M3', timestamp: ts(), source: 't', fields: { pressure: 1008, light_level: 42, energy_used: 77 } },
   ]);
-  if (multiDevice.length === 3) {
-    let anyDiffer = false;
-    for (const field of fieldsToCheck) {
-      const vals = new Set(multiDevice.map(r => r.data[field]));
-      if (vals.size > 1) { anyDiffer = true; break; }
-    }
-    if (anyDiffer) {
-      pass('Multi-device independent randoms', 'different devices got different default values');
-    } else {
-      fail('Multi-device independent randoms', 'all 3 devices got identical defaults — suspicious');
-    }
+  const allowed = new Set(['reading_id', 'temperatureC', 'humidity', 'pressure']);
+  const leakedAny = multi.some(r => Object.keys(r.data).some(k => !allowed.has(k)));
+  if (multi.length === 3 && !leakedAny) {
+    pass('Multi-record fake stripping', '3 records, no fake field leaked');
   } else {
-    fail('Multi-device transform', `expected 3, got ${multiDevice.length}`);
+    fail('Multi-record fake stripping', `count=${multi.length}, leaked=${leakedAny}`);
   }
 
-  // 2f-f. DEFAULT_RANGES exported and well-formed
-  const rangeFields = Object.keys(DEFAULT_RANGES);
-  const wellFormed = rangeFields.every(f => {
-    const r = DEFAULT_RANGES[f];
-    return typeof r.min === 'number' && typeof r.max === 'number'
-      && typeof r.decimals === 'number' && r.min <= r.max && r.decimals >= 0;
-  });
-  if (wellFormed && rangeFields.length === 9) {
-    pass('DEFAULT_RANGES well-formed', `${rangeFields.length} fields, all have min ≤ max and decimals ≥ 0`);
+  // String-encoded numeric values for all three real fields
+  const strValues = toKinabaseRecords([{ machine: 'StrAll', timestamp: ts(), source: 't', fields: { temperature: '10', humidity: '70.5', pressure: '1001.25' } }]);
+  const s = strValues[0]?.data;
+  if (s && Math.abs(s.temperatureC - 283.15) < 0.001 && s.humidity === 70.5 && s.pressure === 1001.25) {
+    pass('String values all three fields', `T=${s.temperatureC}, H=${s.humidity}, P=${s.pressure}`);
   } else {
-    fail('DEFAULT_RANGES', `malformed or wrong count (${rangeFields.length})`);
+    fail('String values all three fields', JSON.stringify(s));
+  }
+}
+
+// ─────────────────────────────────────────────
+// 2h. Transform module API surface
+// ─────────────────────────────────────────────
+console.log('\n📦 2h. Transform Module Surface\n');
+
+{
+  const mod = await import('./src/transform.js');
+  const removed = ['DEFAULT_RANGES', 'randomInRange'];
+  const stillExported = removed.filter(name => name in mod);
+  if (stillExported.length === 0) {
+    pass('Fake-field exports removed', 'DEFAULT_RANGES and randomInRange are not exported');
+  } else {
+    fail('Fake-field exports removed', `still exported: ${stillExported.join(', ')}`);
+  }
+
+  if (typeof mod.toKinabaseRecords === 'function') {
+    pass('toKinabaseRecords exported', 'function');
+  } else {
+    fail('toKinabaseRecords exported', `type=${typeof mod.toKinabaseRecords}`);
+  }
+}
+
+// ─────────────────────────────────────────────
+// 2i. Source-code scan — no fake field names anywhere in src/ or public/
+// ─────────────────────────────────────────────
+console.log('\n🔎 2i. Source Scan for Fake Field Names\n');
+
+{
+  const fs = await import('fs');
+  const path = await import('path');
+
+  const FAKE_FIELDS = [
+    'battery_level', 'signal_strength', 'voltage', 'current_draw',
+    'power_consumption', 'energy_used', 'data_transmitted', 'light_level',
+    'DEFAULT_RANGES', 'randomInRange',
+  ];
+
+  const walk = (dir) => {
+    const out = [];
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) out.push(...walk(p));
+      else if (/\.(js|mjs|html|css)$/.test(entry.name)) out.push(p);
+    }
+    return out;
+  };
+
+  const scanDirs = ['./src', './public'];
+  let hits = [];
+  for (const dir of scanDirs) {
+    for (const file of walk(dir)) {
+      const content = fs.readFileSync(file, 'utf-8');
+      for (const fake of FAKE_FIELDS) {
+        if (content.includes(fake)) {
+          hits.push(`${file}: ${fake}`);
+        }
+      }
+    }
+  }
+
+  if (hits.length === 0) {
+    pass('No fake field names in src/ or public/', `${FAKE_FIELDS.length} forbidden names checked`);
+  } else {
+    fail('Fake field names still present', hits.slice(0, 10).join('; '));
+  }
+}
+
+// ─────────────────────────────────────────────
+// 2j. Kinabase ingest payload filters unexpected fields
+// ─────────────────────────────────────────────
+console.log('\n📤 2j. Kinabase Ingest Payload Filtering\n');
+
+{
+  // KinabaseClient#ingestRecords is private — intercept the outbound fetch
+  // with a mock tokenProvider + global fetch override to capture the payload.
+  const { default: KinabaseClient } = await import('./src/kinabaseClient.js');
+
+  const realFetch = globalThis.fetch;
+  let capturedBody = null;
+
+  // Monkey-patch node-fetch module export is tricky; easier to stub via an
+  // ingest call that we intercept by wrapping fetch. The client imports
+  // fetch from 'node-fetch', so we can't easily swap it here. Instead we
+  // verify by inspecting source: the ingest block must only forward real
+  // fields. This is a secondary check — 2i already scans for fake names.
+  const src = (await import('fs')).readFileSync('./src/kinabaseClient.js', 'utf-8');
+  // Extract the #ingestRecords method body — it starts at "async #ingestRecords"
+  // and ends at the next private method definition.
+  const methodMatch = src.match(/async #ingestRecords[\s\S]*?(?=\n\s*async #findRecordByReadingId)/);
+  const ingestBlock = methodMatch ? methodMatch[0] : '';
+  const FAKES = ['battery_level', 'signal_strength', 'voltage', 'current_draw',
+                 'power_consumption', 'energy_used', 'data_transmitted', 'light_level'];
+  const present = FAKES.filter(f => ingestBlock.includes(f));
+  if (present.length === 0) {
+    pass('kinabaseClient#ingestRecords has no fake-field forwarding', 'clean');
+  } else {
+    fail('kinabaseClient#ingestRecords still references fakes', present.join(', '));
+  }
+
+  // Positive check — ensure all three real fields ARE forwarded
+  const REALS = ['temperatureC', 'humidity', 'pressure'];
+  const missingReals = REALS.filter(f => !ingestBlock.includes(f));
+  if (missingReals.length === 0) {
+    pass('kinabaseClient forwards real fields', REALS.join(', '));
+  } else {
+    fail('kinabaseClient missing real-field forwarding', missingReals.join(', '));
+  }
+
+  globalThis.fetch = realFetch;
+}
+
+// ─────────────────────────────────────────────
+// 2k. InfluxDB field whitelist contains only real fields
+// ─────────────────────────────────────────────
+console.log('\n🗂️  2k. InfluxDB Field Whitelist\n');
+
+{
+  const fs = await import('fs');
+  const influxSrc = fs.readFileSync('./src/influxClient.js', 'utf-8');
+  const whitelistMatch = influxSrc.match(/FIELD_WHITELIST\s*=\s*new Set\(\[([^\]]+)\]\)/);
+  if (!whitelistMatch) {
+    fail('FIELD_WHITELIST parse', 'could not locate whitelist declaration');
+  } else {
+    const fields = whitelistMatch[1]
+      .split(',')
+      .map(s => s.trim().replace(/^['"]|['"]$/g, ''))
+      .filter(Boolean);
+    const expected = new Set(['temperature', 'humidity', 'pressure', 'atmospheric_pressure']);
+    const extras = fields.filter(f => !expected.has(f));
+    const missing = [...expected].filter(f => !fields.includes(f));
+    if (extras.length === 0 && missing.length === 0) {
+      pass('FIELD_WHITELIST is exactly the real fields', fields.join(', '));
+    } else {
+      fail('FIELD_WHITELIST mismatch', `extras=${extras.join(', ') || 'none'}, missing=${missing.join(', ') || 'none'}`);
+    }
+  }
+}
+
+// ─────────────────────────────────────────────
+// 2l. Dashboard HTML has no fake-field reading elements
+// ─────────────────────────────────────────────
+console.log('\n🖥️  2l. Dashboard HTML Cleanup\n');
+
+{
+  const fs = await import('fs');
+  const html = fs.readFileSync('./public/index.html', 'utf-8');
+  const forbiddenIds = [
+    'reading-signal', 'reading-voltage', 'reading-current',
+    'reading-power', 'reading-energy', 'reading-data', 'reading-light',
+  ];
+  const found = forbiddenIds.filter(id => html.includes(`id="${id}"`));
+  if (found.length === 0) {
+    pass('No fake-field DOM ids in index.html', `${forbiddenIds.length} ids checked`);
+  } else {
+    fail('Fake-field DOM ids still present', found.join(', '));
+  }
+
+  // Real-field ids should still be there
+  const requiredIds = ['reading-temp', 'reading-hum', 'reading-pres'];
+  const missing = requiredIds.filter(id => !html.includes(`id="${id}"`));
+  if (missing.length === 0) {
+    pass('Real-field DOM ids present in index.html', requiredIds.join(', '));
+  } else {
+    fail('Real-field DOM ids missing', missing.join(', '));
   }
 }
 

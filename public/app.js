@@ -35,13 +35,6 @@ const statPollDuration = $('stat-poll-duration');
 const readingTemp = $('reading-temp');
 const readingHum = $('reading-hum');
 const readingPres = $('reading-pres');
-const readingSignal = $('reading-signal');
-const readingVoltage = $('reading-voltage');
-const readingCurrent = $('reading-current');
-const readingPower = $('reading-power');
-const readingEnergy = $('reading-energy');
-const readingData = $('reading-data');
-const readingLight = $('reading-light');
 
 // Error panel elements
 const errorPanel = $('error-panel');
@@ -199,17 +192,6 @@ const updateVisualState = (payload) => {
     readingTemp.textContent = formatReading(tempC);
     readingHum.textContent = formatReading(lastReadings.humidity);
     readingPres.textContent = formatReading(lastReadings.pressure, 0);
-    if (readingSignal) {
-      readingSignal.textContent = lastReadings.signal_strength != null
-        ? `${Number(lastReadings.signal_strength).toFixed(0)} dBm`
-        : '–';
-    }
-    if (readingVoltage) readingVoltage.textContent = formatReading(lastReadings.voltage, 2);
-    if (readingCurrent) readingCurrent.textContent = formatReading(lastReadings.current_draw, 1);
-    if (readingPower) readingPower.textContent = formatReading(lastReadings.power_consumption, 2);
-    if (readingEnergy) readingEnergy.textContent = formatReading(lastReadings.energy_used, 3);
-    if (readingData) readingData.textContent = formatReading(lastReadings.data_transmitted, 2);
-    if (readingLight) readingLight.textContent = formatReading(lastReadings.light_level, 1);
   }
 
   // Device
