@@ -1297,6 +1297,23 @@ console.log('\n🖥️  2l. Dashboard HTML Cleanup\n');
   } else {
     fail('Real-field DOM ids missing', missing.join(', '));
   }
+
+  // "Extended Metrics" section header must be gone from the HTML
+  if (!/Extended Metrics/i.test(html)) {
+    pass('"Extended Metrics" section removed from HTML', 'no occurrences');
+  } else {
+    fail('"Extended Metrics" section still in HTML', 'remove the <section-label>Extended Metrics</...> block');
+  }
+
+  // Dead CSS for the removed UI must be gone
+  const css = fs.readFileSync('./public/styles.css', 'utf-8');
+  const deadCssTokens = ['readings-grid--extended', 'reading-card--ext'];
+  const deadCssHits = deadCssTokens.filter(tok => css.includes(tok));
+  if (deadCssHits.length === 0) {
+    pass('Dead extended-metrics CSS removed', `${deadCssTokens.length} selectors checked`);
+  } else {
+    fail('Dead extended-metrics CSS still present', deadCssHits.join(', '));
+  }
 }
 
 // ─────────────────────────────────────────────
